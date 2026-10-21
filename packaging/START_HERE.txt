@@ -1,0 +1,23 @@
+SculptCut Portable — Windows 10/11, 64-bit
+
+1. Extract the entire ZIP to a folder you can write to.
+2. Open SculptCut.exe.
+3. Click the RU / EN button in the top-right corner to switch languages.
+4. Create a project with the + button, add videos, choose settings and click
+   Create video. Use the folder button to open an existing project.
+
+Python, FFmpeg, ffprobe and the required libraries are included.
+No installation, administrator permissions, PATH setup or internet connection
+is required for local editing and export.
+
+Do not run the application from inside the ZIP. Move the SculptCut folder
+as a whole, including bin, _internal and portable.txt.
+
+Settings, language selection and logs are stored in data beside the app.
+Projects and source videos stay in the folders you choose. Copy them separately
+when moving to another computer; use Find sources if their paths change.
+Exported videos are stored in the project's renders folder.
+
+Component licenses: _internal/licenses and licenses/ffmpeg.
+The ZIP checksum is in the accompanying .sha256 file.
+If something fails, keep the error details and the log from data/logs.

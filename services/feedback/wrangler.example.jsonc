@@ -1,0 +1,16 @@
+{
+  "name": "sculptcut-feedback",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-19",
+  "workers_dev": true,
+  "vars": {
+    "TELEGRAM_CHAT_ID": "YOUR_TELEGRAM_CHAT_ID"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sculptcut-feedback",
+      "database_id": "YOUR_CLOUDFLARE_DATABASE_ID"
+    }
+  ]
+}

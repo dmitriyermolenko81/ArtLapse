@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sculptcut"
+version = "0.1.0"
+description = "Local Windows timelapse tooling for recorded ZBrush sessions"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["pydantic==2.12.5", "numpy==2.2.6", "opencv-python-headless==4.12.0.88", "PySide6==6.8.3"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "ruff>=0.9,<1", "mypy>=1.14,<2"]
+build = ["pyinstaller==6.22.0", "pyinstaller-hooks-contrib==2026.7"]
+
+[project.scripts]
+sculptcut = "sculptcut.cli:main"
+sculptcut-gui = "sculptcut.ui:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sculptcut = ["assets/*.png", "assets/*.ico", "assets/*.json", "assets/*.svg"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["src", "tests"]
+mypy_path = "src"
