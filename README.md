@@ -1,68 +1,72 @@
 # ArtLapse
 
-<img src="src/sculptcut/assets/logo.png" alt="Логотип ArtLapse" width="88">
+**English** | [Русский](README.ru.md)
 
-Локальный автоматизированный инструмент для художников: из записей творческого
-процесса он собирает таймлапсы и шортсы для публикации, с возможностью ручных правок.
-Интерфейс — на русском и английском. Основная платформа — Windows x64.
+<img src="src/sculptcut/assets/logo.png" alt="ArtLapse logo" width="88">
 
-![ArtLapse в работе: воспроизведение музыкального Shorts](docs/images/playback.gif)
+A local editing tool for artists: turn recordings of your creative process into
+timelapses and Shorts, then refine the result with manual edits.
+The interface supports English and Russian. The primary platform is Windows x64.
 
-Реальная запись окна: исходники слева, готовый ролик в центре, настройки монтажа
-справа. На примере — скульптинг в ZBrush и музыкальный Shorts длительностью одну минуту.
-[Открыть чёткий скриншот целиком](docs/images/workspace.png).
+![ArtLapse in action: playing a music-synced Short](docs/images/en/playback.gif)
 
-## От исходника до готового ролика
+Actual application footage: source recordings on the left, the finished video in
+the center, and editing settings on the right. This example shows ZBrush sculpting
+and a one-minute music-synced Short.
+[Open the full-resolution screenshot](docs/images/en/workspace.png).
 
-| Выберите область кадра | Подрежьте результат |
+## From recording to finished video
+
+| Choose your framing | Trim the result |
 | --- | --- |
-| [![Выбор квадратной области Shorts на исходной записи ZBrush](docs/images/framing.png)](docs/images/framing.png) | [![Подрезка готового ролика с выделенным участком на шкале времени](docs/images/trimming.png)](docs/images/trimming.png) |
-| Рамку можно перемещать и менять её размер. На снимке открыт выбор квадрата для Shorts. | Выделите ненужный участок на шкале. После вырезки можно сохранить отдельную копию ролика. |
+| [![Choosing a square Shorts frame on a ZBrush recording](docs/images/en/framing.png)](docs/images/en/framing.png) | [![Trimming a finished video with a selected timeline range](docs/images/en/trimming.png)](docs/images/en/trimming.png) |
+| Move and resize the frame. This screenshot shows the square framing dialog for Shorts. | Select an unwanted section on the timeline. After cutting it, you can save a separate copy of the video. |
 
-Нажмите на изображение, чтобы рассмотреть интерфейс в полном размере.
-Это снимки запущенного приложения с реальным проектом, без макетов интерфейса.
+Click an image to view the interface at full resolution.
+These are screenshots of the running application with a real project.
 
-ArtLapse распространяется бесплатно. Если приложение помогает вам экономить
-время, можно [поддержать разработку на Boosty](https://boosty.to/manson93).
-Поддержка добровольная и не требуется для скачивания или использования программы.
+ArtLapse is free to use. If it saves you time, you can
+[support development on Boosty](https://boosty.to/manson93).
+Support is optional and is not required to download or use the application.
 
-## Возможности
+## Features
 
-- Анализ активности, сокращение пауз и монтаж под заданную длительность.
-- Таймлапс, простое ускорение, Shorts и монтаж под музыкальные акценты.
-- Выбор области кадра, вертикальная и квадратная компоновка.
-- Своя музыка, заставка и отдельный презентационный клип проекта.
-- Просмотр эпизодов, ручные исключения, подрезка, отмена и повтор действий.
-- Проекты, сохранённые варианты и повторное использование кэша анализа.
-- Локальная обработка; итоговый экспорт использует оригиналы, не изменяя их.
+- Activity analysis, idle-time reduction, and editing to a target duration.
+- Timelapses, straightforward speed-up, Shorts, and cuts timed to musical accents.
+- Video framing, with vertical and square layouts.
+- Your own music, an intro image, and a separate project presentation clip.
+- Episode review, manual exclusions, trimming, undo, and redo.
+- Saved projects, video variants, and reusable analysis caches.
+- Local processing; final exports use the original recordings without changing them.
 
-Это редактор существующих записей. Рекордер и плагин ZBrush не требуются.
+ArtLapse edits existing recordings. No recorder or ZBrush plugin is required.
 
-## Режимы монтажа
+## Editing modes
 
-| Раздел | Режим | Результат |
+| Section | Mode | Result |
 | --- | --- | --- |
-| TIMELAPSE | Эпизоды | Основные этапы работы с сокращением найденных пауз |
-| TIMELAPSE | Ускорение | Ускоренная запись без автоматических вырезок |
-| SHORTS | 9:16 | Короткий вертикальный монтаж эпизодов скульптинга |
-| SHORTS | Эпизоды под музыку | Движущиеся видеоэпизоды со склейками по музыкальным акцентам |
-| SHORTS | Кадры под музыку | Стоп-кадры, сменяющиеся в ритме музыки |
-| SHORTS | Photoshop 9:16 | Монтаж рисования с кадрированием внутри холста |
-| SHORTS | Photoshop: эпизоды под музыку | Движущиеся отрывки рисования под музыкальные акценты |
-| SHORTS | Photoshop: кадры под музыку | Стоп-кадры отдельных стадий рисунка под музыку |
+| TIMELAPSE | Episodes | Key stages of the creative process, with detected pauses reduced |
+| TIMELAPSE | Speed-up | An accelerated recording without automatic cuts |
+| SHORTS | 9:16 | A short vertical edit of sculpting episodes |
+| SHORTS | Music-synced episodes | Moving video excerpts with cuts timed to musical accents |
+| SHORTS | Music-synced still frames | Still images that change to the rhythm of the music |
+| SHORTS | Photoshop 9:16 | A drawing-process edit framed within the canvas |
+| SHORTS | Photoshop: music-synced episodes | Moving excerpts of the drawing process, timed to musical accents |
+| SHORTS | Photoshop: music-synced still frames | Still images of drawing stages, timed to the music |
 
-Для Shorts доступны вертикальная и квадратная компоновки. Заставка и презентация
-входят в выбранную длительность. При выбранной презентации картинка-заставка
-не участвует. В квадратных музыкальных видеоэпизодах камера неподвижна внутри
-эпизода; повороты и зум исходной записи остаются видимыми.
+Shorts support vertical and square layouts. The intro and presentation clip fit
+within the selected total duration. When a presentation clip is selected, the
+intro image is omitted. In square music-synced video episodes, the camera stays
+fixed within each episode; rotations and zooms recorded in the source remain visible.
 
-## Запуск из исходников
+## Run from source
 
-Нужны Python **3.10+**, FFmpeg и ffprobe в `PATH`. Проверенная среда:
-Windows 10 x64, Python 3.10, PySide6 6.8.3. FFmpeg должен поддерживать `libx264`.
-Установка Python-зависимостей требует доступа к пакетному индексу.
+You need Python **3.10+**, FFmpeg, and ffprobe available in `PATH`. The verified
+environment is Windows 10 x64, Python 3.10, and PySide6 6.8.3.
+FFmpeg must support `libx264`. Installing Python dependencies requires access to
+the package index.
 
-Из корня репозитория в PowerShell:
+Run these commands in PowerShell:
 
 ```powershell
 git clone https://github.com/dmitriyermolenko81/SculptCut.git ArtLapse
@@ -73,49 +77,49 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m artlapse.ui
 ```
 
-Если FFmpeg отсутствует в `PATH`, задайте полные пути:
+If FFmpeg is not in `PATH`, set its full path and the path to ffprobe:
 
 ```powershell
 $env:ARTLAPSE_FFMPEG = "C:\Tools\ffmpeg\bin\ffmpeg.exe"
 $env:ARTLAPSE_FFPROBE = "C:\Tools\ffmpeg\bin\ffprobe.exe"
 ```
 
-В окне создайте проект кнопкой **+**, добавьте видео, выберите режим,
-длительность и музыку, затем нажмите **«Создать ролик»**. Кнопка **RU / EN**
-справа вверху переключает язык. Колесо меняет длительность без текстового
-курсора; ручной ввод включается щелчком ЛКМ по числу.
+In the application, create a project with **+**, add your recordings, choose a
+mode, duration, and music, then click **Create video**. The **RU / EN** button in
+the upper-right corner changes the interface language. Scroll to adjust duration;
+click a number with the left mouse button to type a value.
 
-При подрезке «Сохранить копию» предлагает «Просто вырезать» (по умолчанию)
-или «Вырезать и сохранить длительность». Второй способ меняет темп оставшихся
-эпизодов и доступен обычным/Photoshop-шортсам с планом и достаточным материалом.
-Для музыкальных режимов и неподдерживаемых версий он отключён с объяснением;
-обычная подрезка остаётся доступной. Предыдущая версия сохраняется.
+When trimming, **Save copy** offers **Just cut** (the default) and **Cut and keep
+duration**. The second option adjusts the speed of the remaining episodes. It is
+available for standard and Photoshop Shorts with a saved plan and enough source
+material. For music modes and unsupported variants, it is disabled with an
+explanation; ordinary trimming remains available. The previous version is preserved.
 
-## Командная строка
+## Command line
 
 ```powershell
 .\.venv\Scripts\python.exe -m artlapse --help
 .\.venv\Scripts\python.exe -m artlapse run "D:\ArtLapseProjects\demo" "D:\Videos\recording.mp4" --target-seconds 600 --output "D:\Exports\timelapse.mp4"
 ```
 
-Исходные записи, музыка и пользовательские проекты в репозиторий не входят.
-Для локальной проверки можно сгенерировать синтетические записи:
+Source recordings, music, and user projects are not included in the repository.
+You can generate synthetic recordings for local checks:
 
 ```powershell
 .\.venv\Scripts\python.exe -m artlapse fixtures artifacts/fixtures
 ```
 
-## Переносная версия Windows
+## Portable Windows version
 
-Если используете готовый переносной ZIP, распакуйте **всю папку** и запустите
-`ArtLapse.exe`. В такой сборке Python, FFmpeg и ffprobe находятся внутри;
-настройки и журналы сохраняются в `data` рядом с EXE.
-Краткая инструкция на русском и английском: [Start.txt](packaging/Start.txt).
-Переносите всю папку программы, включая служебные файлы.
-Исходный репозиторий не содержит готовых EXE или видео.
-Инструкции сборки: [docs/windows_build.md](docs/windows_build.md).
+If you have a portable ZIP build, extract the **entire folder** and run
+`ArtLapse.exe`. Such a build includes Python, FFmpeg, and ffprobe; settings and
+logs are stored in `data` beside the executable.
+The short Russian/English first-run guide is [Start.txt](packaging/Start.txt).
+Move the whole application folder, including its supporting files.
+This source repository does not include application executables or user videos.
+Build instructions: [docs/windows_build.md](docs/windows_build.md).
 
-## Проверки
+## Checks
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
@@ -123,61 +127,62 @@ $env:ARTLAPSE_FFPROBE = "C:\Tools\ffmpeg\bin\ffprobe.exe"
 .\.venv\Scripts\python.exe -m mypy src
 ```
 
-Интеграционным проверкам нужны FFmpeg/ffprobe и доступный рабочий стол.
-Необязательным тестам локального сервиса обратной связи нужен Node.js
-с модулем `node:sqlite`; при его отсутствии они пропускаются.
+Integration checks require FFmpeg/ffprobe and an available desktop session.
+Optional local feedback-service tests require Node.js with the `node:sqlite`
+module; they are skipped when it is unavailable.
 
-Полная локальная проверка с журналами, реальным коротким экспортом,
-ffprobe, декодированием и запуском окна:
+For a full local validation with logs, a real short export, ffprobe, complete
+decoding, and an application window:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/validate.py
 ```
 
-Результаты сохраняются в новой папке `artifacts/validation-*`, вне Git.
-Только итоговый `PASS` в `report.json` подтверждает полный прогон.
+Results are saved in a new `artifacts/validation-*` folder outside Git.
+Only a final `PASS` in `report.json` confirms that the full run passed.
 
-GitHub Actions выполняет Ruff, mypy и быстрые тесты без FFmpeg. Полный прогон
-с медиа и GUI выполняется указанной выше локальной командой; эти проверки
-не подменяют друг друга. Настройка CI: [.github/workflows/quality.yml](.github/workflows/quality.yml).
+GitHub Actions runs Ruff, mypy, and fast tests without FFmpeg. Full media and GUI
+validation is performed locally using the command above; the two checks cover
+different scopes. Workflow: [.github/workflows/quality.yml](.github/workflows/quality.yml).
 
-## Устройство проекта
+## Project layout
 
-| Каталог | Содержимое |
+| Directory | Contents |
 | --- | --- |
-| `src/sculptcut` | Модели, анализ, планировщик, рендер и PySide6-интерфейс |
-| `tests` | Модульные, интеграционные и GUI-проверки |
-| `packaging` | Сборка Windows, переносной ZIP и лицензии компонентов |
-| `scripts` | Воспроизводимая проверка приложения |
-| `services/feedback` | Необязательный сервис обратной связи, без личных конфигов |
-| `docs` | Инструкции и формат разметки |
+| `src/sculptcut` | Models, analysis, planning, rendering, and the PySide6 interface |
+| `tests` | Unit, integration, and GUI checks |
+| `packaging` | Windows builds, portable ZIP packaging, and component licenses |
+| `scripts` | Reproducible application validation |
+| `services/feedback` | An optional feedback service, without personal configuration |
+| `docs` | Guides and the annotation format |
 
-Настройка необязательного сервиса: [docs/feedback_setup.md](docs/feedback_setup.md).
-Он не нужен для монтажа и экспорта.
+Optional feedback-service setup: [docs/feedback_setup.md](docs/feedback_setup.md).
+It is not required for editing or exporting videos.
 
-Изменения: [CHANGELOG.md](CHANGELOG.md). Порядок работы с проектом:
+Changes: [CHANGELOG.md](CHANGELOG.md). Contribution workflow:
 [CONTRIBUTING.md](CONTRIBUTING.md).
-Результаты локальной проверки: [подготовка GitHub](docs/GITHUB_PREPARATION.md).
+Local validation results: [GitHub source preparation](docs/GITHUB_PREPARATION.md).
+Some linked project documents are currently in Russian.
 
-## Ограничения
+## Limitations
 
-Анализ опирается на пиксели: он не знает геометрию модели и историю Undo.
-Похожий кадр не доказывает отмену работы; результат нужно просматривать.
-Качество распознавания не заявляется подтверждённым на размеченном наборе
-реальных записей. Длинные видео требуют места для proxy и кэша.
-Поведение на macOS и Linux отдельно не подтверждено.
+Analysis uses pixels; it does not know the model's geometry or undo history.
+A similar frame does not prove that work was undone, so review the result.
+Recognition quality has not been established on a labeled dataset of real
+recordings. Long videos require disk space for proxies and caches.
+Behavior on macOS and Linux has not been separately verified.
 
-## Лицензии
+## Licenses
 
-Условия бесплатного личного и коммерческого использования: [LICENSE](LICENSE).
-Приложение не объявляется open source; сторонние лицензии сохраняются.
-Замена LGPL-библиотек: [инструкция](docs/LIBRARY_REPLACEMENT.md).
-Публичная раздача пока не подготовлена: [статус](docs/launch/RELEASE_CHECKLIST.md).
-Лицензии зависимостей и уведомления о компонентах находятся в
+Terms for free personal and commercial use: [LICENSE](LICENSE).
+The application is not offered under an open-source license; third-party
+licenses are retained. Replacing LGPL libraries: [guide](docs/LIBRARY_REPLACEMENT.md).
+Public binary distribution is not ready yet: [status](docs/launch/RELEASE_CHECKLIST.md).
+Dependency licenses and component notices are in
 [packaging/THIRD_PARTY_NOTICES.md](packaging/THIRD_PARTY_NOTICES.md)
-и [packaging/licenses](packaging/licenses).
+and [packaging/licenses](packaging/licenses).
 
-Приложение ранее называлось SculptCut. Старые проекты и настройки совместимы.
-Python API `sculptcut` и прежние команды сохранены; новое имя команд —
-`artlapse` / `artlapse-gui`, также `python -m artlapse` / `python -m artlapse.ui`.
-Рабочие адреса GitHub и Telegram прежние.
+The application was previously called SculptCut. Existing projects and settings
+remain compatible. The `sculptcut` Python API and legacy commands are retained;
+the new commands are `artlapse` / `artlapse-gui`, or `python -m artlapse` /
+`python -m artlapse.ui`. The existing GitHub and Telegram addresses remain unchanged.
