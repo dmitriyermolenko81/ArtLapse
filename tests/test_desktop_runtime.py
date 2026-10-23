@@ -23,7 +23,7 @@ def test_portable_tools_and_state_follow_moved_folder(
     (root / "portable.txt").write_text("portable", encoding="utf-8")
     (root / "bin/ffmpeg.exe").write_bytes(b"test executable path")
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", str(root / "SculptCut.exe"))
+    monkeypatch.setattr(sys, "executable", str(root / "ArtLapse.exe"))
     monkeypatch.delenv("SCULPTCUT_DATA_DIR", raising=False)
     monkeypatch.setenv("SCULPTCUT_FFMPEG", str(tmp_path / "missing.exe"))
     assert portable_root() == root
@@ -33,7 +33,7 @@ def test_portable_tools_and_state_follow_moved_folder(
         discover("ffprobe")
     moved = tmp_path / "другое место"
     root.rename(moved)
-    monkeypatch.setattr(sys, "executable", str(moved / "SculptCut.exe"))
+    monkeypatch.setattr(sys, "executable", str(moved / "ArtLapse.exe"))
     assert data_directory() == moved / "data"
     assert Path(discover("ffmpeg")) == moved / "bin/ffmpeg.exe"
     monkeypatch.setenv("SCULPTCUT_DATA_DIR", str(tmp_path / "diagnostics"))
@@ -47,7 +47,7 @@ def test_runtime_logs_in_configured_unicode_directory(
     monkeypatch.setenv("SCULPTCUT_DATA_DIR", str(root))
     logger = configure_logging(io.StringIO())
     logger.info("Запуск", extra={"event": "startup"})
-    path = root / "logs" / f"sculptcut-{os.getpid()}.jsonl"
+    path = root / "logs" / f"artlapse-{os.getpid()}.jsonl"
     assert json.loads(path.read_text(encoding="utf-8"))["event"] == "startup"
     monkeypatch.delenv("SCULPTCUT_DATA_DIR")
     configure_logging(io.StringIO())

@@ -46,7 +46,7 @@ def test_all_presets_fit_with_intro_and_saved_versions(
         assert window.folder.x() == 0
         assert window.folder.geometry().right() < window.new_project_button.x()
         for preset in ("timelapse", "speed", "shorts", "music_shorts", "beat_shorts",
-                       "photoshop_shorts", "photoshop_beat_shorts"):
+                       "photoshop_shorts", "photoshop_beat_shorts", "photoshop_music_shorts"):
             window.preset.setCurrentIndex(window.preset.findData(preset))
             settle(app)
             for scroll in (window.sidebar_scroll, window.viewer_scroll, window.settings_scroll):
@@ -121,7 +121,7 @@ def test_settings_keep_positions_across_modes(size: tuple[int, int]) -> None:
         area_slots = [geometry(window.frame_mode.buttons[value])
                       for value in ("full", "viewport")]
         for preset in ("shorts", "music_shorts", "beat_shorts", "photoshop_shorts",
-                       "photoshop_beat_shorts", "speed", "timelapse"):
+                       "photoshop_beat_shorts", "photoshop_music_shorts", "speed", "timelapse"):
             window.preset.setCurrentIndex(window.preset.findData(preset))
             settle(app)
             assert [geometry(control) for control in controls] == baseline, (size, preset)

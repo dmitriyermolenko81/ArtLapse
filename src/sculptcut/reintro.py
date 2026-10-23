@@ -10,7 +10,7 @@ from sculptcut.domain import Project
 from sculptcut.intro import intro_frames, intro_signature
 from sculptcut.music_library import music_signature
 from sculptcut.output_naming import next_variant_path
-from sculptcut.planning import RenderPlan
+from sculptcut.planning import RenderPlan, plan_project
 from sculptcut.presentation import presentation_frames
 from sculptcut.project import load_project, resolve_snapshot_sources, save_project
 from sculptcut.rendering import render
@@ -56,6 +56,11 @@ def replace_intro(
     history = cut_history(video)
 
     snapshot_project = Project.model_validate(state["project"])
+    if snapshot_project.settings.presentation_video is not None:
+        raise ValueError(
+            "Для этого варианта выбрано презентационное видео. "
+            "Отключите презентацию и создайте новый ролик, чтобы использовать заставку."
+        )
     snapshot_project = resolve_snapshot_sources(snapshot_project, load_project(root))
     had_intro = snapshot_project.settings.intro_image is not None
     snapshot_settings = snapshot_project.settings.model_copy(update={"intro_image": image})
@@ -85,6 +90,15 @@ def replace_intro(
         }
     )
     plan = plan.model_copy(update={"settings": plan_settings})
+    replanned = False
+    if not had_intro and not history and plan.settings.get("duration_budget") == "total-207":
+        # Adding a cover changes the body budget and the soundtrack offset.
+        # Reuse cached analysis, then select/retime against that smaller budget.
+        plan = plan_project(
+            root, render_project, float(plan.settings["target_seconds"]), cancel,
+            (lambda value: progress(value * 0.4)) if progress else None,
+        )
+        replanned = True
 
     destination = next_variant_path(
         video.parent, "intro-variant", snapshot_settings.preset
@@ -129,9 +143,12 @@ def replace_intro(
             )
         result = destination
     else:
+        render_progress = (
+            (lambda value: progress(0.4 + value * 0.6)) if replanned and progress else progress
+        )
         result = render(
             root, render_project, plan, destination, cancel, encoder=encoder,
-            progress=progress, variant_project=snapshot_project,
+            progress=render_progress, variant_project=snapshot_project,
             variant_parent=video, variant_operation="intro",
         )
     current = load_project(root)

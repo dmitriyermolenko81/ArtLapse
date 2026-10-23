@@ -10,6 +10,7 @@ from sculptcut.domain import Project
 from sculptcut.intro import body_start_frame
 from sculptcut.music_library import music_signature
 from sculptcut.planning import RenderDecision, RenderPlan, validate_plan
+from sculptcut.project import load_project, resolve_snapshot_sources
 from sculptcut.rendering import render
 from sculptcut.variants import read_variant
 
@@ -135,8 +136,8 @@ def refill_plan_after_cuts(
     target = plan.target_frame_count
     if not kept or sum(maximum) < target:
         raise ValueError(
-            "После вырезки недостаточно исходного материала для полного минутного шортса "
-            "без повторов или замедления."
+            "После вырезки недостаточно исходного материала, чтобы сохранить "
+            "запланированную длительность без повторов или замедления."
         )
     counts = distribute(minimum, [float(value) for value in minimum], maximum, target)
     for index, count in zip(kept, counts, strict=True):
@@ -178,7 +179,8 @@ def rebuild_short_after_cuts(
     if not state.get("project") or not state.get("plan"):
         raise ValueError(
             "У выбранного шортса нет сохранённого монтажного плана. "
-            "Его можно подрезать, но автоматически достроить до минуты нельзя."
+            "Его можно подрезать, но автоматически восстановить "
+            "запланированную длительность нельзя."
         )
     if state.get("operation") == "cut":
         raise ValueError("Выберите исходную готовую версию шортса, а не подрезанную копию")
@@ -186,6 +188,7 @@ def rebuild_short_after_cuts(
     snapshot_plan = RenderPlan.model_validate(state["plan"])
     if snapshot_project.settings.preset not in ("shorts", "photoshop_shorts"):
         raise ValueError("Выбранный ролик не является шортсом")
+    snapshot_project = resolve_snapshot_sources(snapshot_project, load_project(root))
 
     saved_music: Path | None = None
     music_state = state.get("music")

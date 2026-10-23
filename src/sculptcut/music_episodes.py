@@ -26,6 +26,14 @@ class MusicEpisodeSettings:
 SETTINGS = MusicEpisodeSettings()
 
 
+def episode_speed_limit(project: Project) -> int:
+    if project.settings.preset == "photoshop_music_shorts":
+        from sculptcut.photoshop_story import STORY as DRAWING_STORY
+
+        return DRAWING_STORY.max_speed
+    return STORY.max_speed
+
+
 def episode_grid(
     project: Project, frame_count: int, events: list[MusicEvent], music_offset: float = 0.0,
 ) -> list[int]:
@@ -81,7 +89,9 @@ def fit_episode_grid(project: Project, plan: RenderPlan, grid: list[int]) -> Ren
 
     active = [d for d in plan.decisions if d.output_frame_count]
     if not active or len(active) >= len(grid) or any(
-        d.action != "SPEED" or d.provenance not in ("user:process_story", "user:shorts_final")
+        d.action != "SPEED" or d.provenance not in (
+            "user:process_story", "user:shorts_final", "photoshop:music_episode",
+        )
         for d in active
     ):
         return None
@@ -114,7 +124,7 @@ def fit_episode_grid(project: Project, plan: RenderPlan, grid: list[int]) -> Ren
             continue
         count = next(allocation)
         start, end = decision.source_start_us, decision.source_end_us
-        maximum_us = count * STORY.max_speed * 1_000_000 // plan.output_fps
+        maximum_us = count * episode_speed_limit(project) * 1_000_000 // plan.output_fps
         if end - start > maximum_us:
             start = end - maximum_us if decision.provenance == "user:shorts_final" else (
                 start + (end - start - maximum_us) // 2
@@ -141,7 +151,9 @@ def describe_sync(project: Project, plan: RenderPlan, beats: dict[int, float]) -
     total = max(0, len(active) - 1)
     status = "on" if aligned == total and total else "partial" if beats else "unavailable"
     result = plan.model_copy(update={"settings": plan.settings | {
-        "story": "music_episodes", "beat_sync": status,
+        "story": "photoshop_music_episodes"
+        if project.settings.preset == "photoshop_music_shorts" else "music_episodes",
+        "beat_sync": status,
         "beat_sync_aligned_cuts": aligned, "beat_sync_total_cuts": total,
         "final_view_frames": sum(d.output_frame_count for d in active
                                  if d.provenance == "user:shorts_final"),
@@ -180,7 +192,7 @@ def retime_episodes(
             bounds.append((count, count))
             continue
         natural = max(1, (decision.source_end_us - decision.source_start_us) * fps // 1_000_000)
-        low = max(math.ceil(natural / STORY.max_speed),
+        low = max(math.ceil(natural / episode_speed_limit(project)),
                   round(project.settings.beat_sync_min_shot_seconds * fps), 1)
         high = natural
         bounds.append((min(count, low), max(count, high)))
@@ -234,7 +246,9 @@ def sync_music_episodes(
     settings = project.settings
     if not settings.beat_sync_enabled or settings.beat_sync_strength <= 0:
         return plan.model_copy(update={"settings": plan.settings | {
-            "story": "music_episodes", "beat_sync": "disabled",
+            "story": "photoshop_music_episodes"
+            if project.settings.preset == "photoshop_music_shorts" else "music_episodes",
+            "beat_sync": "disabled",
         }})
     events, offset = music_events(root, project, plan.actual_frame_count, cancel)
     return retime_episodes(project, plan, events, offset, cancel)

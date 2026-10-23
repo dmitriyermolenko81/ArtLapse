@@ -1,0 +1,4 @@
+--- a/libavfilter/vsrc_gfxcapture_winrt.cpp
++++ b/libavfilter/vsrc_gfxcapture_winrt.cpp
+@@ -56,0 +57 @@
++#include <system_error>

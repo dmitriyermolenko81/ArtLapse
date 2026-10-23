@@ -165,7 +165,7 @@ class ProjectSettings(Model):
     final_view_seconds: float = Field(default=10, ge=0, le=60)
     preset: Literal[
         "timelapse", "shorts", "beat_shorts", "music_shorts", "speed",
-        "photoshop_shorts", "photoshop_beat_shorts",
+        "photoshop_shorts", "photoshop_beat_shorts", "photoshop_music_shorts",
     ] = "timelapse"
     output_name: str = ""
 

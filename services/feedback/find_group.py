@@ -33,7 +33,7 @@ def main() -> None:
         app = QApplication.instance() or QApplication([])
         app.setStyleSheet(STYLE)
         dialog = QInputDialog()
-        dialog.setWindowTitle("Подключение Telegram — SculptCut")
+        dialog.setWindowTitle("Подключение Telegram — ArtLapse")
         dialog.setLabelText(
             "Добавьте @SculptCut_bot в группу и вставьте ключ от BotFather.\n"
             "Ключ используется только для запроса к Telegram и не сохраняется."
@@ -56,12 +56,12 @@ def main() -> None:
         token = dialog.textValue().strip()
         dialog.setTextValue("")
     else:
-        print("Создайте бота через @BotFather и добавьте его в группу SculptCut.")
+        print("Создайте бота через @BotFather и добавьте его в группу ArtLapse.")
         token = getpass.getpass("Ключ бота (ввод скрыт, никуда не сохраняется): ").strip()
 
     def notify(message: str) -> None:
         if args.gui:
-            show_notice(None, "Подключение Telegram — SculptCut", message)
+            show_notice(None, "Подключение Telegram — ArtLapse", message)
         else:
             print(message)
 

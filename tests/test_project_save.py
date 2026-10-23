@@ -72,7 +72,9 @@ def test_saving_preserves_panel_geometry(
         app.processEvents()
 
 
-@pytest.mark.parametrize("preset", ["beat_shorts", "photoshop_beat_shorts"])
+@pytest.mark.parametrize("preset", [
+    "beat_shorts", "photoshop_beat_shorts", "photoshop_music_shorts",
+])
 def test_music_mode_restores_automatic_sync_from_legacy_project(
     tmp_path: Path, preset: str,
 ) -> None:

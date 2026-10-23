@@ -1,0 +1,82 @@
+ArtLapse — первый запуск
+
+1. Сохраните всю папку программы в удобном месте, доступном для записи.
+   Если программа получена в архиве, сначала распакуйте его целиком.
+2. Запустите ArtLapse.exe. Установка и права администратора не нужны.
+3. Нажмите «+», создайте проект и добавьте исходные видео.
+4. Выберите режим, длительность, музыку и нажмите «Создать ролик».
+   Готовое видео сохраняется в папке renders выбранного проекта.
+
+Кнопка RU / EN справа вверху переключает язык интерфейса.
+Python, FFmpeg и необходимые библиотеки уже включены в программу.
+Интернет для монтажа и экспорта не нужен. Исходные видео не изменяются.
+
+КРАТКО О РЕЖИМАХ
+
+Раздел TIMELAPSE:
+- Эпизоды — сокращает найденные паузы и собирает основные этапы работы.
+- Ускорение — ускоряет всю запись без автоматических вырезок.
+
+Раздел SHORTS:
+- 9:16 — короткий вертикальный монтаж из эпизодов 3D-скульптинга.
+- Эпизоды (под музыку) — движущиеся видеоэпизоды сменяются
+  под музыкальные акценты; работа внутри эпизода продолжается.
+- Музыка (кадры) — отдельные стоп-кадры сменяются в ритме музыки.
+- Ps 9:16 — вертикальный монтаж процесса рисования с кадрированием холста.
+- Ps эпизоды — движущиеся отрывки рисования сменяются под музыку.
+- Ps музыка — стадии рисунка показываются стоп-кадрами под музыку.
+
+Для Shorts также доступен квадрат 1:1 с полями в вертикальном видео.
+
+Переносите папку программы целиком: одного EXE для работы недостаточно.
+Папки _internal и bin содержат компоненты программы, data — ваши настройки
+и журналы. Не удаляйте эти папки.
+
+Дополнительные сведения: _internal/docs.
+Условия использования: _internal/LICENSE.
+Лицензии компонентов: _internal/licenses.
+При ошибке сохраните сообщение и журнал из data/logs.
+
+
+======================================================================
+ENGLISH
+======================================================================
+
+ArtLapse — first launch
+
+1. Keep the entire application folder in a convenient, writable location.
+   If you received an archive, extract it completely before launching.
+2. Run ArtLapse.exe. No installation or administrator rights are required.
+3. Click “+”, create a project and add your source videos.
+4. Choose a mode, duration and music, then click “Create video”.
+   The finished video is saved in the selected project's renders folder.
+
+The RU / EN button in the upper-right corner switches the interface language.
+Python, FFmpeg and the required libraries are already included.
+Editing and exporting work offline. Your source videos are not modified.
+
+MODES AT A GLANCE
+
+TIMELAPSE section:
+- Episodes — shortens detected pauses and combines the main stages of your work.
+- Speed-up — speeds up the entire recording without automatic cuts.
+
+SHORTS section:
+- 9:16 — creates a short vertical edit from 3D sculpting episodes.
+- Episodes (music) — moving video clips change on musical accents;
+  the work continues within each clip.
+- Music (still frames) — individual still frames change to the music's rhythm.
+- Ps 9:16 — creates a vertical drawing-process edit framed within the canvas.
+- Ps episodes — moving drawing clips change to the music.
+- Ps music — drawing stages are shown as still frames set to music.
+
+Shorts also support a square 1:1 picture with bands inside a vertical video.
+
+Always move the entire application folder: the EXE alone is not sufficient.
+The _internal and bin folders contain application components; data contains
+your settings and logs. Do not delete these folders.
+
+Additional information: _internal/docs.
+Application terms: _internal/LICENSE.
+Component licenses: _internal/licenses.
+If an error occurs, keep the error message and the log from data/logs.

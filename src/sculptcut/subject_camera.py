@@ -56,6 +56,17 @@ def tracking_clip(
 ) -> Path:
     """Use the export decoder and timeline, never OpenCV's long-file seek."""
     ratio = output_frames / output_fps / ((end_us - start_us) / 1e6) if output_frames else 1.0
+    filters = (
+        f"trim=duration={(end_us - start_us) / 1e6:.6f},setpts=(PTS-STARTPTS)*{ratio:.12f},"
+        f"fps={output_fps},scale='min(960,iw)':-2"
+    )
+    if output_frames:
+        # Fractional seeks and the last source timestamp may leave one fewer frame.
+        # Match the export's bounded tail padding and its exact integer frame budget.
+        filters += (
+            f",tpad=stop_mode=clone:stop_duration={output_frames / output_fps:.8f},"
+            f"trim=end_frame={output_frames}"
+        )
     run_process(
         [
             discover("ffmpeg"),
@@ -71,8 +82,7 @@ def tracking_clip(
             f"0:{source.stream_index}",
             "-an",
             "-vf",
-            f"trim=duration={(end_us - start_us) / 1e6:.6f},setpts=(PTS-STARTPTS)*{ratio:.12f},"
-            f"fps={output_fps},scale='min(960,iw)':-2",
+            filters,
             "-c:v",
             "libx264",
             "-preset",

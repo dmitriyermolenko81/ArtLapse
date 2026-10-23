@@ -104,7 +104,7 @@ def test_english_all_presets_fit_and_have_no_russian_interface_text(size: tuple[
         window.show()
         window.language_button.click()
         for preset in ("timelapse", "speed", "shorts", "music_shorts", "beat_shorts",
-                       "photoshop_shorts", "photoshop_beat_shorts"):
+                       "photoshop_shorts", "photoshop_beat_shorts", "photoshop_music_shorts"):
             window.preset.setCurrentIndex(window.preset.findData(preset))
             app.processEvents()
             assert_english(window)

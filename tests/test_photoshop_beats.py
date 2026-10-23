@@ -157,12 +157,13 @@ def test_photoshop_music_stills_keep_one_camera_in_real_export_and_preview(
         plan_project(root, project, 6, cancelled)
 
 
-def test_photoshop_music_preset_ui_and_required_music(tmp_path: Path) -> None:
+@pytest.mark.parametrize("preset", ["photoshop_beat_shorts", "photoshop_music_shorts"])
+def test_photoshop_music_preset_ui_and_required_music(tmp_path: Path, preset: str) -> None:
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
     try:
         window.show()
-        window.preset.setCurrentIndex(window.preset.findData("photoshop_beat_shorts"))
+        window.preset.setCurrentIndex(window.preset.findData(preset))
         app.processEvents()
         assert window.shorts_mode.isChecked()
         assert window.shorts_layout.isVisible()

@@ -1,0 +1,140 @@
+{
+  "schema": 1,
+  "inputs": [
+    {
+      "file": "ffmpeg-8.1.2.tar.xz",
+      "url": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+      "license": "GPL-3.0-or-later, configured GPLv3+",
+      "bytes": 11710924,
+      "sha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c"
+    },
+    {
+      "file": "x264-0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee.tar.bz2",
+      "url": "https://code.videolan.org/videolan/x264/-/archive/0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee/x264-0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee.tar.bz2",
+      "license": "GPL-2.0-or-later",
+      "bytes": 848652,
+      "sha256": "f05c59f2e83d494c36307025dca2d3afc6b4d185f3a3453d06cc4fecd7094057"
+    },
+    {
+      "file": "libvpx-1.15.2.tar.gz",
+      "url": "https://codeload.github.com/webmproject/libvpx/tar.gz/refs/tags/v1.15.2",
+      "license": "BSD-3-Clause + PATENTS",
+      "bytes": 5630368,
+      "sha256": "26fcd3db88045dee380e581862a6ef106f49b74b6396ee95c2993a260b4636aa"
+    },
+    {
+      "file": "opus-1.6.1.tar.gz",
+      "url": "https://downloads.xiph.org/releases/opus/opus-1.6.1.tar.gz",
+      "license": "BSD-3-Clause + patent grants",
+      "bytes": 10472813,
+      "sha256": "6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1",
+      "upstream_sha256": "6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1"
+    },
+    {
+      "file": "dav1d-1.5.3.tar.xz",
+      "url": "https://download.videolan.org/pub/videolan/dav1d/1.5.3/dav1d-1.5.3.tar.xz",
+      "license": "BSD-2-Clause + third-party notices",
+      "bytes": 1022836,
+      "sha256": "732010aa5ef461fa93355ed2c6c5fedb48ddc4b74e697eaabe8907eaeb943011"
+    },
+    {
+      "file": "zlib-1.3.2.tar.gz",
+      "url": "https://zlib.net/zlib-1.3.2.tar.gz",
+      "license": "Zlib",
+      "bytes": 1502830,
+      "sha256": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16",
+      "upstream_sha256": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16"
+    },
+    {
+      "file": "nv-codec-headers-13.0.19.0.tar.gz",
+      "url": "https://codeload.github.com/FFmpeg/nv-codec-headers/tar.gz/refs/tags/n13.0.19.0",
+      "license": "MIT",
+      "bytes": 83385,
+      "sha256": "86d15d1a7c0ac73a0eafdfc57bebfeba7da8264595bf531cf4d8db1c22940116"
+    },
+    {
+      "file": "pkgconf-2.5.1.tar.xz",
+      "url": "https://distfiles.ariadne.space/pkgconf/pkgconf-2.5.1.tar.xz",
+      "license": "ISC",
+      "bytes": 328064,
+      "sha256": "cd05c9589b9f86ecf044c10a2269822bc9eb001eced2582cfffd658b0a50c243"
+    },
+    {
+      "file": "make-4.4.1.tar.gz",
+      "url": "https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz",
+      "license": "GPL-3.0-or-later",
+      "bytes": 2348200,
+      "sha256": "dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3",
+      "extract": false
+    },
+    {
+      "file": "nasm-3.01.tar.xz",
+      "url": "https://www.nasm.us/pub/nasm/releasebuilds/3.01/nasm-3.01.tar.xz",
+      "license": "BSD-2-Clause",
+      "bytes": 1499136,
+      "sha256": "b7324cbe86e767b65f26f467ed8b12ad80e124e3ccb89076855c98e43a9eddd4",
+      "extract": false
+    },
+    {
+      "file": "nasm-3.01-win64.zip",
+      "url": "https://www.nasm.us/pub/nasm/releasebuilds/3.01/win64/nasm-3.01-win64.zip",
+      "license": "BSD-2-Clause",
+      "bytes": 594502,
+      "sha256": "e0ba5157007abc7b1a65118a96657a961ddf55f7e3f632ee035366dfce039ca4"
+    },
+    {
+      "file": "llvm-mingw-source-20261020.tar.gz",
+      "url": "https://codeload.github.com/mstorsjo/llvm-mingw/tar.gz/refs/tags/20261020",
+      "license": "ISC build scripts",
+      "bytes": 71028,
+      "sha256": "58927987f6050c2348e5e97037b5a8be096569427143211c8ebcece86da7f42d",
+      "extract": false
+    },
+    {
+      "file": "llvm-verified.zip",
+      "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20261020/llvm-mingw-20261020-ucrt-x86_64.zip",
+      "license": "LLVM Apache-2.0 WITH LLVM-exception + bundled notices",
+      "bytes": 190612575,
+      "sha256": "fd5462b7f5d93b2ff981fcd3f9c7e427e47f3203c64ea91c27bcc444eebd74cd"
+    },
+    {
+      "file": "mingw-w64-source.zip",
+      "url": "https://codeload.github.com/mingw-w64/mingw-w64/zip/0d6dfbc348dfad714761c0a7151615767f96bcb5",
+      "license": "MinGW-w64 notices in archive",
+      "bytes": 19562295,
+      "sha256": "9e96bd959d208efdbbfe1da735f1a2672f9b0a335a66d56e82a4c8248c124441",
+      "extract": false
+    },
+    {
+      "file": "meson-1.9.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/9c/07/b48592d325cb86682829f05216e4efb2dc881762b8f1bafb48b57442307a/meson-1.9.1-py3-none-any.whl",
+      "license": "Build tool license in wheel",
+      "bytes": 1030356,
+      "sha256": "f824ab770c041a202f532f69e114c971918ed2daff7ea56583d80642564598d0"
+    },
+    {
+      "file": "ninja-1.13.0-py3-none-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/29/45/c0adfbfb0b5895aa18cec400c535b4f7ff3e52536e0403602fc1a23f7de9/ninja-1.13.0-py3-none-win_amd64.whl",
+      "license": "Build tool license in wheel",
+      "bytes": 309975,
+      "sha256": "fb8ee8719f8af47fed145cced4a85f0755dd55d45b2bddaf7431fa89803c5f3e"
+    },
+    {
+      "file": "llvm-project-23.1.4.src.tar.xz",
+      "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.4/llvm-project-23.1.4.src.tar.xz",
+      "license": "Apache-2.0 WITH LLVM-exception and per-file notices",
+      "bytes": 179272572,
+      "sha256": "819ecf7351f1a66f76b2d701d8942faaf5faeb324cb90c9d5b090de142434bb2",
+      "upstream_sha256": "819ecf7351f1a66f76b2d701d8942faaf5faeb324cb90c9d5b090de142434bb2",
+      "extract": false
+    }
+  ],
+  "verification": "Official HTTPS origins; FFmpeg GPG verified; LLVM binary/source digests match official GitHub release; Opus/zlib match official SHA256; Meson/Ninja wheels match PyPI SHA256. Other SHA256 values pin retrieved bytes; no independent upstream signature is claimed.",
+  "revisions": {
+    "ffmpeg": "38b88335f99e76ed89ff3c93f877fdefce736c13",
+    "libvpx": "d168454ecd099805c675d4a98c66f4891373302a",
+    "x264": "0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee",
+    "mingw-w64": "0d6dfbc348dfad714761c0a7151615767f96bcb5",
+    "llvm": "7a941dfb2877a0b8cf30323fefa85ad019e0b0f5"
+  }
+}

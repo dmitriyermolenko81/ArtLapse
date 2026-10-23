@@ -1,0 +1,10 @@
+--- a/meson.build
++++ b/meson.build
+@@ -565,0 +566,2 @@
++    fs = import('fs')
++    nasm_relative_src = fs.relative_to(dav1d_src_root / 'src', meson.project_build_root())
+@@ -571,2 +573,2 @@
+-            '-I', '@0@/src/'.format(dav1d_src_root),
+-            '-I', '@0@/'.format(meson.current_build_dir()),
++            '-I', nasm_relative_src + '/',
++            '-I', './',

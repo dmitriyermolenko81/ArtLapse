@@ -54,6 +54,7 @@ def test_square_selection_and_project_restore(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("preset", [
     "shorts", "beat_shorts", "photoshop_shorts", "photoshop_beat_shorts",
+    "photoshop_music_shorts",
 ])
 def test_create_opens_square_dialog_and_remembers_selection(
     tmp_path: Path, preset: str, monkeypatch: pytest.MonkeyPatch,

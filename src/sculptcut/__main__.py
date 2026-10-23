@@ -1,4 +1,4 @@
-"""Support running SculptCut with python -m sculptcut."""
+"""Support running ArtLapse with python -m sculptcut."""
 
 from sculptcut.cli import main
 

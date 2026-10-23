@@ -10,6 +10,7 @@ from pathlib import Path
 from threading import Event
 
 from sculptcut.domain import ProjectSettings
+from sculptcut.intro import active_intro_image, body_frame_budget
 from sculptcut.media import Cancelled, MediaError, MediaInfo, discover, probe, run_process
 from sculptcut.music_library import audio_duration, library_files
 from sculptcut.project import fingerprint, load_project
@@ -62,7 +63,7 @@ def writable_directory(path: Path) -> Path:
         raise ValueError(f"Вместо папки обнаружен файл: {existing}")
     try:
         with tempfile.TemporaryFile(prefix=".sculptcut-write-check-", dir=existing) as stream:
-            stream.write(b"SculptCut")
+            stream.write(b"ArtLapse")
             stream.flush()
             os.fsync(stream.fileno())
     except OSError as exc:
@@ -78,13 +79,13 @@ def estimate_space(
     else:
         largest = max(sources, key=lambda s: s.width * s.height)
         width, height = largest.width, largest.height
-    seconds = settings.target_seconds + (
-        settings.presentation_seconds if settings.presentation_video else 0
-    )
+    seconds = settings.target_seconds
     output = (width * height * settings.output_fps * seconds
               * policy.output_bytes_per_pixel_frame * policy.output_copies)
     proxies = 0.0
-    if settings.preset not in ("speed", "photoshop_shorts", "photoshop_beat_shorts"):
+    if settings.preset not in (
+        "speed", "photoshop_shorts", "photoshop_beat_shorts", "photoshop_music_shorts",
+    ):
         for source in sources:
             w, h = source.width, source.height
             if source.rotation % 180 == 90:
@@ -108,6 +109,7 @@ def check_creation(
     cancelled(cancel)
     if not paths:
         raise ValueError("Добавьте хотя бы одно исходное видео.")
+    body_frame_budget(settings, settings.output_fps, settings.target_seconds)
     root = root.resolve()
     if root.exists() and not root.is_dir():
         raise ValueError("Вместо папки проекта выбран файл.")
@@ -151,8 +153,8 @@ def check_creation(
             raise
         except MediaError as exc:
             raise ValueError(f"Не удалось прочитать музыку: {track.name}. Проверьте файл.") from exc
-    if settings.intro_image:
-        readable(settings.intro_image, "Заставка")
+    if (image := active_intro_image(settings)) is not None:
+        readable(image, "Заставка")
     if settings.presentation_video:
         if stage:
             stage("Проверяем видео-презентацию")

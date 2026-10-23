@@ -8,6 +8,7 @@ from threading import Event
 import numpy as np
 
 from sculptcut.domain import Project
+from sculptcut.intro import body_start_frame, output_frame_count
 from sculptcut.media import Cancelled, discover, run_process
 from sculptcut.music_library import soundtrack
 from sculptcut.planning import RenderPlan, validate_plan
@@ -85,19 +86,21 @@ def accents(path: Path, seconds: float, loop: bool, cancel: Event | None) -> lis
 
 
 def align_plan(root: Path, project: Project, plan: RenderPlan, cancel: Event | None) -> RenderPlan:
-    music = soundtrack(root, project.settings, plan.actual_frame_count / plan.output_fps, cancel)
+    duration = output_frame_count(project.settings, plan.output_fps, plan.actual_frame_count)
+    offset = body_start_frame(project.settings, plan.output_fps, plan.actual_frame_count)
+    music = soundtrack(root, project.settings, duration / plan.output_fps, cancel)
     if music is None:
         return plan
     peaks = accents(
-        music, plan.actual_frame_count / plan.output_fps, project.settings.music_loop, cancel
+        music, duration / plan.output_fps, project.settings.music_loop, cancel
     )
     fps = plan.output_fps
     beat_frames = sorted(
         set(
-            round(t * fps)
+            round(t * fps) - offset
             for t in peaks
             if project.settings.music_fade_seconds
-            < t
+            < t - offset / fps
             < plan.actual_frame_count / fps - project.settings.music_fade_seconds
         )
     )

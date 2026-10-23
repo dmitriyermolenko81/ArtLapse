@@ -1,0 +1,13 @@
+--- a/VERSION
++++ /dev/null
+@@ -1 +0,0 @@
+-8.1.2
+--- /dev/null
++++ b/FFMPEG_RELEASE_VERSION
+@@ -0,0 +1 @@
++8.1.2
+--- a/ffbuild/version.sh
++++ b/ffbuild/version.sh
+@@ -38 +38 @@
+-version=$(cd "$1" && cat VERSION 2> /dev/null)
++version=$(cd "$1" && cat FFMPEG_RELEASE_VERSION 2> /dev/null)

@@ -30,8 +30,8 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging(stream: TextIO | None = None) -> logging.Logger:
-    """Configure the SculptCut logger without changing the root logger."""
-    logger = logging.getLogger("sculptcut")
+    """Configure the ArtLapse logger without changing the root logger."""
+    logger = logging.getLogger("artlapse")
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
         handler.close()
@@ -45,7 +45,7 @@ def configure_logging(stream: TextIO | None = None) -> logging.Logger:
         try:
             directory.mkdir(parents=True, exist_ok=True)
             file_handler = RotatingFileHandler(
-                directory / f"sculptcut-{os.getpid()}.jsonl",
+                directory / f"artlapse-{os.getpid()}.jsonl",
                 maxBytes=2_000_000,
                 backupCount=3,
                 encoding="utf-8",

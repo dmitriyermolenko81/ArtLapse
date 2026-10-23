@@ -1,0 +1,8 @@
+--- a/ffbuild/library.mak
++++ b/ffbuild/library.mak
+@@ -39 +39 @@
+-	$(Q)echo $^ > $@.objs
++	$(file >$@.objs,$^)
+@@ -80 +80 @@
+-	$(Q)echo $$(filter %.o,$$^) > $$@.objs
++	$$(file >$$@.objs,$$(filter %.o,$$^))

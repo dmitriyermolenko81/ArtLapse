@@ -111,7 +111,9 @@ def test_narrow_window_keeps_player_controls_visible_with_long_variant_name(
         app.processEvents()
 
 
-@pytest.mark.parametrize("preset", ["beat_shorts", "photoshop_beat_shorts", "music_shorts"])
+@pytest.mark.parametrize("preset", [
+    "beat_shorts", "photoshop_beat_shorts", "music_shorts", "photoshop_music_shorts",
+])
 def test_musical_rebuild_never_silently_restores_manually_cut_footage(
     tmp_path: Path, preset: str,
 ) -> None:

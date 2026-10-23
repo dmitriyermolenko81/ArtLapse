@@ -232,7 +232,7 @@ def evaluate_suite(
     atomic_write(output / "quality.json", serialized)
     atomic_write(
         output / "quality.html",
-        '<!doctype html><meta charset="utf-8"><title>SculptCut quality</title>'
+        '<!doctype html><meta charset="utf-8"><title>ArtLapse quality</title>'
         "<h1>Оценка качества</h1><pre>" + html.escape(serialized) + "</pre>",
     )
     return output / "quality.html"

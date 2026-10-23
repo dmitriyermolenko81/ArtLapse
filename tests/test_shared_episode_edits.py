@@ -51,11 +51,11 @@ def test_shared_edits_cross_all_presets_with_simple_speed_exception(tmp_path: Pa
     rules = project.overrides
     save_project(root, project)
     for preset in ("timelapse", "shorts", "music_shorts", "beat_shorts", "photoshop_shorts",
-                   "photoshop_beat_shorts", "speed"):
+                   "photoshop_beat_shorts", "photoshop_music_shorts", "speed"):
         project = load_project(root)
         settings = ProjectSettings.model_validate(project.settings.model_dump() | {
             "preset": preset, "proxy_width": 320, "proxy_fps": 5,
-            "music_path": track if "beat" in preset or preset == "music_shorts" else None,
+            "music_path": track if "beat" in preset or "music" in preset else None,
             "final_view_seconds": 0, "music_fade_seconds": 0,
         })
         project = project.model_copy(update={"settings": settings})

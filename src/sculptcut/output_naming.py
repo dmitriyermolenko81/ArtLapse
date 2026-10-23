@@ -19,6 +19,7 @@ PRESET_SUFFIXES = {
     "music_shorts": "music_shorts",
     "photoshop_shorts": "photoshop_shorts",
     "photoshop_beat_shorts": "photoshop_beat_shorts",
+    "photoshop_music_shorts": "photoshop_music_shorts",
     "speed": "speed",
 }
 

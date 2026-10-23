@@ -12,10 +12,12 @@ from sculptcut.analysis import Gray
 from sculptcut.budget import distribute
 from sculptcut.domain import Model, Project
 from sculptcut.idle import IdleRange
+from sculptcut.image_statistics import median_uint8
 from sculptcut.media import Cancelled, MediaError
 from sculptcut.planning import RenderPlan, validate_plan
 from sculptcut.project import cache_key, cache_session
 from sculptcut.proxy import proxy_path, validated_frame_count
+from sculptcut.screen_cache import cached_screen_result
 from sculptcut.webcam import AnalysisCapture, analysis_media_key, webcam_roi
 
 
@@ -32,6 +34,12 @@ DEFAULT_SCREENS = ScreenSettings()
 
 
 def screen_kind(gray: Gray, settings: ScreenSettings = DEFAULT_SCREENS) -> str | None:
+    return cached_screen_result(
+        gray, settings.model_dump_json, lambda: _screen_kind(gray, settings),
+    )
+
+
+def _screen_kind(gray: Gray, settings: ScreenSettings) -> str | None:
     h, w = gray.shape
     center = gray[h // 8 : h * 7 // 8, w // 8 : w * 7 // 8]
     if float(np.mean(center <= settings.black)) >= settings.blank_fraction:
@@ -39,7 +47,7 @@ def screen_kind(gray: Gray, settings: ScreenSettings = DEFAULT_SCREENS) -> str |
     if float(np.mean(center >= settings.white)) >= settings.blank_fraction:
         return "white_screen"
     small = cv2.resize(gray, (960, max(1, round(h * 960 / w)))).astype(np.uint8)
-    mask = (small > max(85, float(np.median(small)) + 25)).astype(np.uint8)
+    mask = (small > max(85, median_uint8(small) + 25)).astype(np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)).astype(np.uint8)
     _, _, stats, centers = cv2.connectedComponentsWithStats(mask)
     points = sorted(

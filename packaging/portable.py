@@ -25,7 +25,7 @@ def package(source: Path, ffmpeg: Path, destination: Path, archive: Path) -> Non
         raise ValueError("Destination and archive must not exist")
     if destination.is_relative_to(source) or archive.is_relative_to(destination):
         raise ValueError("Output paths must be outside the input/staged folder")
-    for path in (source / "SculptCut.exe", source / "sculptcut-cli.exe",
+    for path in (source / "ArtLapse.exe", source / "artlapse-cli.exe",
                  ffmpeg / "bin/ffmpeg.exe", ffmpeg / "bin/ffprobe.exe",
                  ffmpeg / "LICENSE", ffmpeg / "README.txt"):
         if not path.is_file():
@@ -53,14 +53,20 @@ def package(source: Path, ffmpeg: Path, destination: Path, archive: Path) -> Non
     (licenses / "versions.json").write_text(
         json.dumps(versions, indent=2), encoding="utf-8",
     )
-    (destination / "portable.txt").write_text("SculptCut portable v1\n", encoding="utf-8")
+    (destination / "portable.txt").write_text("ArtLapse portable v1\n", encoding="utf-8")
     shutil.copy2(Path(__file__).parent / "НАЧНИТЕ_ЗДЕСЬ.txt", destination)
     shutil.copy2(Path(__file__).parent / "START_HERE.txt", destination)
+    project_root = Path(__file__).resolve().parent.parent
+    shutil.copy2(project_root / "LICENSE", destination / "LICENSE")
+    shutil.copy2(Path(__file__).parent / "THIRD_PARTY_NOTICES.md", destination)
+    for name in ("LIBRARY_REPLACEMENT.md", "DATA_AND_FEEDBACK.md"):
+        (destination / "docs").mkdir(exist_ok=True)
+        shutil.copy2(project_root / "docs" / name, destination / "docs" / name)
     archive.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as output:
         for path in sorted(destination.rglob("*")):
             if path.is_file():
-                output.write(path, Path("SculptCut") / path.relative_to(destination))
+                output.write(path, Path("ArtLapse") / path.relative_to(destination))
     archive.with_suffix(".zip.sha256").write_text(
         f"{digest(archive)}  {archive.name}\n", encoding="utf-8",
     )

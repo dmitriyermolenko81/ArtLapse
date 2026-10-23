@@ -12,13 +12,14 @@ from pydantic import Field
 from sculptcut.analysis import analysis_key
 from sculptcut.budget import distribute
 from sculptcut.development import development_key
-from sculptcut.domain import Model, Project, Roi, SubjectCamera
+from sculptcut.domain import Model, Project, Roi, SourceMedia, SubjectCamera
 from sculptcut.idle import IdleRange, project_idle
-from sculptcut.intro import intro_signature
+from sculptcut.intro import body_frame_budget, intro_signature, output_frame_count
 from sculptcut.music_library import music_signature
 from sculptcut.project import atomic_write, cache_key, database, validate_sources
+from sculptcut.screen_cache import screen_check_cache
 from sculptcut.segmentation import SEGMENT_VERSION, Segment
-from sculptcut.shorts_layout import MUSIC_SHORTS_PRESETS, SHORTS_PRESETS
+from sculptcut.shorts_layout import MUSIC_SHORTS_PRESETS, PHOTOSHOP_PRESETS, SHORTS_PRESETS
 from sculptcut.webcam import webcam_roi
 
 
@@ -296,6 +297,7 @@ def weighted_plan(project: Project, base: RenderPlan, segments: list[Segment]) -
     return plan
 
 
+@screen_check_cache()
 def plan_project(
     root: Path,
     project: Project,
@@ -312,10 +314,14 @@ def plan_project(
         if stage:
             stage(message)
         else:
-            logging.getLogger("sculptcut").info(message, extra={"event": "planning_stage"})
+            logging.getLogger("artlapse").info(message, extra={"event": "planning_stage"})
 
     if cancel and cancel.is_set():
         raise Cancelled("Planning cancelled")
+    total_target_seconds = target_seconds
+    target_seconds = body_frame_budget(
+        project.settings, project.settings.output_fps, target_seconds,
+    ) / project.settings.output_fps
     validate_sources(root, project)
     from sculptcut.overrides import apply_overrides, exclude_dropped
 
@@ -342,13 +348,21 @@ def plan_project(
         ):
             project_identity["settings"].pop(key, None)
     if uses_square(project.settings):
-        project_identity["settings"]["square_camera_version"] = "horizontal-2-viewport"
-    if project.settings.preset == "music_shorts":
+        project_identity["settings"]["square_camera_version"] = (
+            "horizontal-208-fixed-music-episodes"
+            if project.settings.preset in ("music_shorts", "photoshop_music_shorts")
+            else "horizontal-2-viewport"
+        )
+    if project.settings.preset in ("music_shorts", "photoshop_music_shorts"):
         from dataclasses import asdict
 
         from sculptcut.music_episodes import SETTINGS as MUSIC_EPISODES
 
         project_identity["settings"]["music_episodes"] = asdict(MUSIC_EPISODES)
+        if project.settings.preset == "photoshop_music_shorts":
+            from sculptcut.photoshop_story import STORY as DRAWING_STORY
+
+            project_identity["settings"]["photoshop_episodes"] = asdict(DRAWING_STORY)
     if project.settings.preset == "timelapse":
         from dataclasses import asdict
 
@@ -356,8 +370,10 @@ def plan_project(
 
         project_identity["settings"]["timelapse_cleanup"] = asdict(SETTINGS)
     request_key = cache_key(
-        "final-presentation-117",
-        "plan-146-music-first-episodes"
+        "total-duration-207-v2",
+        "plan-206-photoshop-music-episodes"
+        if project.settings.preset == "photoshop_music_shorts"
+        else "plan-146-music-first-episodes"
         if project.settings.preset == "music_shorts"
         else "plan-100-photoshop-beat-fixed-camera"
         if project.settings.preset == "photoshop_beat_shorts"
@@ -376,6 +392,28 @@ def plan_project(
         intro_signature(project.settings),
     )
     saved = root / "render_plan.json"
+
+    def finish_plan(plan: RenderPlan) -> RenderPlan:
+        requested = max(1, round(total_target_seconds * plan.output_fps))
+        if (plan.target_frame_count < requested
+                and output_frame_count(project.settings, plan.output_fps,
+                                       plan.actual_frame_count) > requested):
+            raise ValueError(
+                "Монтаж не укладывается в заданное время вместе с заставкой/презентацией. "
+                "Увеличьте длительность или измените ручные ограничения скорости."
+            )
+        result = plan.model_copy(update={"settings": plan.settings | {
+            "request_key": request_key, "duration_budget": "total-207",
+            "target_seconds": total_target_seconds,
+            "requested_output_frames": requested,
+            "actual_output_frames": output_frame_count(
+                project.settings, plan.output_fps, plan.actual_frame_count,
+            ),
+        }})
+        validate_plan(project, result)
+        atomic_write(saved, result.model_dump_json(indent=2))
+        return result
+
     if saved.is_file():
         try:
             cached = RenderPlan.model_validate_json(saved.read_text(encoding="utf-8"))
@@ -384,8 +422,8 @@ def plan_project(
                 return cached
         except (ValueError, OSError):
             pass  # A derived plan can be rebuilt from the validated project and analysis.
-    if project.settings.preset in ("speed", "photoshop_shorts", "photoshop_beat_shorts"):
-        if project.settings.preset in ("photoshop_shorts", "photoshop_beat_shorts"):
+    if project.settings.preset == "speed" or project.settings.preset in PHOTOSHOP_PRESETS:
+        if project.settings.preset in PHOTOSHOP_PRESETS:
             from sculptcut.photoshop_idle import project_photoshop_idle
 
             idle = project_photoshop_idle(
@@ -398,28 +436,37 @@ def plan_project(
                 plan = photoshop_beat_plan(root, project, plan, cancel, progress)
                 plan = apply_overrides(project, plan)
                 plan = present_final_result(project, plan)
-                plan = plan.model_copy(
-                    update={"settings": plan.settings | {"request_key": request_key}}
-                )
-                atomic_write(root / "render_plan.json", plan.model_dump_json(indent=2))
-                return plan
+                return finish_plan(plan)
             from sculptcut.photoshop_stability import score_source_window
             from sculptcut.photoshop_story import episodic_photoshop_plan
 
-            plan = episodic_photoshop_plan(
-                project,
-                plan,
-                lambda source, start, end: score_source_window(
+            def score_drawing(source: SourceMedia, start: int, end: int) -> float:
+                return score_source_window(
                     root, source, start, end, cancel, webcam_roi(project.settings, source.id),
-                ),
-                (lambda value: progress(0.35 + value * 0.2)) if progress else None,
-            )
+                )
+
+            drawing_progress = (lambda value: progress(0.35 + value * 0.2)) if progress else None
+            if project.settings.preset == "photoshop_music_shorts":
+                from sculptcut.music_episodes import music_episode_grid
+                from sculptcut.photoshop_music import photoshop_music_plan
+
+                phase("Подстраиваем смену видеоэпизодов под музыку")
+                grid = music_episode_grid(root, project, plan.actual_frame_count, cancel)
+                plan = photoshop_music_plan(
+                    project, plan, grid, score_drawing, cancel, drawing_progress,
+                )
+            else:
+                plan = episodic_photoshop_plan(project, plan, score_drawing, drawing_progress)
         else:
             plan = simple_speed_plan(project, target_seconds)
-        if project.settings.preset == "photoshop_shorts":
+        if project.settings.preset in ("photoshop_shorts", "photoshop_music_shorts"):
             from sculptcut.photoshop import reframe_photoshop
 
             plan = apply_overrides(project, plan)
+            if project.settings.preset == "photoshop_music_shorts":
+                from sculptcut.music_episodes import sync_music_episodes
+
+                plan = sync_music_episodes(root, project, plan, cancel)
             plan = plan.model_copy(
                 update={
                     "settings": plan.settings
@@ -434,11 +481,10 @@ def plan_project(
             )
             validate_plan(project, plan)
         plan = apply_square_layout(project, plan, root, cancel)
-        plan = present_final_result(project, plan)
+        if project.settings.preset != "photoshop_music_shorts":
+            plan = present_final_result(project, plan)
         validate_plan(project, plan)
-        plan = plan.model_copy(update={"settings": plan.settings | {"request_key": request_key}})
-        atomic_write(root / "render_plan.json", plan.model_dump_json(indent=2))
-        return plan
+        return finish_plan(plan)
     connection = database(root)
     try:
         for source in project.sources:
@@ -469,9 +515,7 @@ def plan_project(
         plan = apply_square_layout(project, plan, root, cancel)
         plan = present_final_result(project, plan)
         validate_plan(project, plan)
-        plan = plan.model_copy(update={"settings": plan.settings | {"request_key": request_key}})
-        atomic_write(root / "render_plan.json", plan.model_dump_json(indent=2))
-        return plan
+        return finish_plan(plan)
     if project.settings.preset in ("shorts", "music_shorts"):
         from sculptcut.process_story import process_plan
 
@@ -556,6 +600,4 @@ def plan_project(
     else:
         plan = present_final_result(project, plan)
     validate_plan(project, plan)
-    plan = plan.model_copy(update={"settings": plan.settings | {"request_key": request_key}})
-    atomic_write(root / "render_plan.json", plan.model_dump_json(indent=2))
-    return plan
+    return finish_plan(plan)

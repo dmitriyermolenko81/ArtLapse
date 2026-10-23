@@ -22,7 +22,7 @@ def horizontal_camera(
     previous_x: float | None = None,
     viewport: Roi | None = None,
 ) -> SubjectCamera:
-    """Lock a whole episode when possible; pan only when a fixed square cannot fit it."""
+    """Lock musical episodes; other square modes may pan when the subject cannot fit."""
     half = roi.width / 2
     viewport = viewport or Roi(x=0, y=roi.y, width=1, height=roi.height)
     lower = viewport.x + half
@@ -54,6 +54,12 @@ def horizontal_camera(
             target = max(low, min(high, (left + right) / 2))
             if abs(target - initial) <= roi.width * settings.square_tracking_dead_zone:
                 target = max(low, min(high, initial))
+            points = [CameraPoint(time_us=start_us, x=target, y=cy)]
+        elif settings.preset in ("music_shorts", "photoshop_music_shorts"):
+            # Reframing belongs at the musical cut, never between observations.
+            # Keep the selected scale even when the subject exceeds the square;
+            # centering its complete travel minimizes unavoidable edge clipping.
+            target = max(lower, min(upper, (left + right) / 2))
             points = [CameraPoint(time_us=start_us, x=target, y=cy)]
         else:
             center = initial

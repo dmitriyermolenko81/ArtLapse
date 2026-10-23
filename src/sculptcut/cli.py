@@ -13,6 +13,7 @@ from sculptcut.cache_management import DAG, cleanup_stale
 from sculptcut.domain import Override, Project, ProjectSettings, Roi
 from sculptcut.fixtures import generate_suite
 from sculptcut.idle import project_idle
+from sculptcut.intro import body_frame_budget
 from sculptcut.logging_config import configure_logging
 from sculptcut.media import MediaError, doctor, probe_dict
 from sculptcut.performance import configure_analysis_threads
@@ -48,7 +49,7 @@ COMMANDS = {
 def build_parser() -> argparse.ArgumentParser:
     """Build the public CLI parser."""
     parser = argparse.ArgumentParser(
-        prog="sculptcut", description="SculptCut — local timelapse editor."
+        prog="artlapse", description="ArtLapse — automated shorts and timelapses for artists."
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -83,7 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
                 "--preset",
                 choices=[
                     "timelapse", "shorts", "beat_shorts", "music_shorts", "speed",
-                    "photoshop_shorts", "photoshop_beat_shorts",
+                    "photoshop_shorts", "photoshop_beat_shorts", "photoshop_music_shorts",
                 ],
             )
             sub.add_argument("--sculpt-only", action=argparse.BooleanOptionalAction, default=None)
@@ -239,10 +240,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                     }
                 )
                 save_project(root, project)
+            if args.command in ("plan", "run"):
+                body_frame_budget(
+                    project.settings, project.settings.output_fps, args.target_seconds,
+                )
             if args.command == "run" and project.settings.preset not in (
                 "speed",
                 "photoshop_shorts",
                 "photoshop_beat_shorts",
+                "photoshop_music_shorts",
             ):
                 extract_features(root, project)
             if args.command in ("plan", "run"):
@@ -262,7 +268,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 print(plan.model_dump_json(indent=2))
             if project.settings.preset not in (
-                "speed", "photoshop_shorts", "photoshop_beat_shorts",
+                "speed", "photoshop_shorts", "photoshop_beat_shorts", "photoshop_music_shorts",
             ):
                 try:
                     review_html(root, project)

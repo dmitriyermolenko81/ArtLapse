@@ -24,7 +24,7 @@ def test_first_import_creates_unique_project_and_preserves_form(
     shutil.copy2(source, second)
     original = source.read_bytes()
     parent = tmp_path / "Проекты"
-    existing = parent / "скульптинг_SculptCut"
+    existing = parent / "скульптинг_ArtLapse"
     existing.mkdir(parents=True)
     marker = existing / "do-not-touch.txt"
     marker.write_text("existing project", encoding="utf-8")
@@ -53,7 +53,7 @@ def test_first_import_creates_unique_project_and_preserves_form(
             QTest.qWait(10)
         assert window.job is None
         assert not window.last_error, window.last_error
-        root = parent / "скульптинг_SculptCut-002"
+        root = parent / "скульптинг_ArtLapse-002"
         project = load_project(root)
         assert window.root == root
         assert Path(window.folder.text()) == root
@@ -95,7 +95,7 @@ def test_cancel_location_rolls_back_import_without_touching_source(
         assert window.source_paths() == []
         assert window.folder.text() == ""
         assert window.job is None and window.root is None
-        assert not list(tmp_path.glob("*_SculptCut*"))
+        assert not list(tmp_path.glob("*_ArtLapse*"))
         assert window.drop_zone.isVisible()
         assert "отменено" in window.status.text()
         assert source.read_bytes() == original

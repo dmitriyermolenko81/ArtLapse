@@ -170,7 +170,7 @@ def apply_beat_sync(
         }
     )
     validate_plan(project, result)
-    logging.getLogger("sculptcut").info(
+    logging.getLogger("artlapse").info(
         "Beat Sync adjusted Shorts edit points",
         extra={"event": "beat_sync", "adjusted_cuts": changes, "tempo_bpm": analysis.tempo_bpm},
     )

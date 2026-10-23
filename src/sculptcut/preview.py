@@ -11,7 +11,7 @@ import numpy as np
 
 from sculptcut.audio import add_music
 from sculptcut.domain import Project, Roi
-from sculptcut.intro import output_frame_count, prepend_intro
+from sculptcut.intro import active_intro_image, output_frame_count, prepend_intro
 from sculptcut.media import Cancelled, MediaError
 from sculptcut.music_library import soundtrack
 from sculptcut.planning import RenderPlan, validate_plan
@@ -259,12 +259,13 @@ def render_preview(
             screen_guard=plan.settings.get("story") == "process",
             bookend_plan=plan,
             square_bands=uses_square(project.settings),
+            encoder="libx264",
         )
-        if project.settings.intro_image is not None:
+        if (intro_image := active_intro_image(project.settings)) is not None:
             intro = temporary / "intro.mp4"
             prepend_intro(
                 ready,
-                project.settings.intro_image,
+                intro_image,
                 intro,
                 width=out_w,
                 height=out_h,

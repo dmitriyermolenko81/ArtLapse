@@ -1,4 +1,4 @@
-"""One-minute chronological highlights and conservative model-centred reframing."""
+"""Chronological shorts highlights and conservative model-centred reframing."""
 
 import tempfile
 from collections.abc import Callable

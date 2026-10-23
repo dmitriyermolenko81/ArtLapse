@@ -41,11 +41,13 @@ def project_deletion_target(root: Path, extra_inputs: Iterable[Path] = ()) -> Pr
     if root.parent == root or any(
         place.resolve().is_relative_to(root)
         for place in (Path.home(), Path.cwd(), Path(sys.executable).parent)
-    ) or any((root / name).exists() for name in (".git", "pyproject.toml", "SculptCut.exe")):
-        raise ValueError("Эту папку нельзя удалить как проект. Выберите отдельную папку SculptCut.")
+    ) or any((root / name).exists() for name in (
+        ".git", "pyproject.toml", "ArtLapse.exe", "SculptCut.exe",
+    )):
+        raise ValueError("Эту папку нельзя удалить как проект. Выберите отдельную папку ArtLapse.")
     marker = root / "project.json"
     if not plain_file(root, marker):
-        raise ValueError("Папка не содержит обычный файл проекта SculptCut.")
+        raise ValueError("Папка не содержит обычный файл проекта ArtLapse.")
     project = load_project(root)
     for path in protected_paths(project, extra_inputs):
         if path == root or path.is_relative_to(root):

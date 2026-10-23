@@ -133,10 +133,11 @@ def test_dense_preview_uses_one_output_encode(
         screen_guard: bool = False,
         bookend_plan: RenderPlan | None = None,
         square_bands: bool = False,
+        encoder: str = "auto",
     ) -> list[int]:
         calls.append(source)
         return normalize_timing(
-            source, destination, fps, cancel, screen_guard, bookend_plan, square_bands
+            source, destination, fps, cancel, screen_guard, bookend_plan, square_bands, encoder
         )
 
     monkeypatch.setattr(rendering, "normalize_timing", tracked)

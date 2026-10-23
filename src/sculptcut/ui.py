@@ -79,6 +79,7 @@ from PySide6.QtWidgets import (
 from sculptcut.analysis import analysis_key, extract_features
 from sculptcut.compact_label import CompactLabel
 from sculptcut.crop_dialog import TimelapseCropDialog, WebcamDialog
+from sculptcut.cut_save_dialog import CutSaveDialog
 from sculptcut.domain import (
     DEFAULT_BEAT_SYNC_MODE,
     DEFAULT_BEAT_SYNC_STRENGTH,
@@ -97,7 +98,7 @@ from sculptcut.media import Cancelled
 from sculptcut.music_library import EXTENSIONS
 from sculptcut.output_cut_editor import OutputCutEditor
 from sculptcut.output_naming import clean_output_name, next_output_path, output_suffix
-from sculptcut.planning import plan_project
+from sculptcut.planning import RenderPlan, plan_project
 from sculptcut.playback_volume import PlaybackVolume, VolumeControl
 from sculptcut.popover import exec_anchored
 from sculptcut.preflight import check_creation
@@ -447,7 +448,7 @@ class Job(QThread):
         try:
             self.result.emit(self.operation(self.cancel, self.report_progress, self.stage.emit))
         except Exception as exc:
-            logging.getLogger("sculptcut").exception("GUI operation failed")
+            logging.getLogger("artlapse").exception("GUI operation failed")
             self.failure.emit(f"{type(exc).__name__}: {exc}")
 
 
@@ -497,7 +498,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("SculptCut")
+        self.setWindowTitle("ArtLapse")
         application_icon = QIcon(str(Path(__file__).parent / "assets" / "logo.ico"))
         QApplication.setWindowIcon(application_icon)
         self.setWindowIcon(application_icon)
@@ -527,8 +528,14 @@ class MainWindow(QMainWindow):
         self.recent_settings = (
             QSettings(str(settings_data / "settings.ini"), INI_FORMAT)
             if settings_data is not None
-            else QSettings("SculptCut", "SculptCut")
+            else QSettings("ArtLapse", "ArtLapse")
         )
+        if settings_data is None and not self.recent_settings.allKeys():
+            # Copy once, preserving the old namespace for older installed versions.
+            legacy_settings = QSettings("SculptCut", "SculptCut")
+            for key in legacy_settings.allKeys():
+                self.recent_settings.setValue(key, legacy_settings.value(key))
+            self.recent_settings.sync()
         selected_language = str(self.recent_settings.value("interface_language", "ru"))
         install_language(selected_language if selected_language in ("ru", "en") else "ru")
         self.setLocale(QLocale("ru_RU" if selected_language != "en" else "en_US"))
@@ -562,7 +569,7 @@ class MainWindow(QMainWindow):
             )
         )
         brand_layout.addWidget(brand)
-        title = QLabel("SculptCut")
+        title = QLabel("ArtLapse")
         title.setObjectName("title")
         brand_layout.addWidget(title)
         brand_layout.addStretch()
@@ -751,6 +758,7 @@ class MainWindow(QMainWindow):
         self.duration_divider = category_divider()
         form.addRow(tr("Длительность"), self.duration_card)
         self.duration_label = cast(QLabel, form.labelForField(self.duration_card))
+        self.duration_label.setToolTip(tr("Включает заставку и презентационное видео."))
         self.duration_label.setObjectName("settingsCategory")
         self.preset = PresetSelector()
         self.normal_minutes = 10.0
@@ -762,6 +770,7 @@ class MainWindow(QMainWindow):
         self.preset.addItem(tr("Шортс · под музыку · кадры"), "beat_shorts")
         self.preset.addItem(tr("Просто ускорение · без вырезок"), "speed")
         self.preset.addItem("Photoshop · 9:16", "photoshop_shorts")
+        self.preset.addItem(tr("Photoshop · под музыку · видеоэпизоды"), "photoshop_music_shorts")
         self.preset.addItem(tr("Photoshop · под музыку · кадры"), "photoshop_beat_shorts")
         self.preset.currentIndexChanged.connect(self.preset_changed)
         self.mode_settings_title = QLabel(tr("Настройки таймлапса"))
@@ -915,6 +924,7 @@ class MainWindow(QMainWindow):
         form.addRow(tr("Заставка"), intro_row)
         self.intro_label = cast(QLabel, form.labelForField(intro_row))
         self.intro_label.setObjectName("settingsCategory")
+        self.intro_label.setWordWrap(True)
         mode_settings_layout.addLayout(form)
         settings_side.addWidget(self.mode_settings_panel)
         settings_side.addStretch(1)
@@ -1300,7 +1310,7 @@ class MainWindow(QMainWindow):
         for selector in (self.preset, self.frame_mode, self.shorts_layout,
                          self.music_selection):
             for button in selector.buttons.values():
-                button.setMinimumWidth(44 if compact else 52)
+                button.setMinimumWidth(44 if compact or selector is self.preset else 52)
                 format_button = button.toolButtonStyle() == (
                     Qt.ToolButtonStyle.ToolButtonTextUnderIcon
                 )
@@ -2153,7 +2163,7 @@ class MainWindow(QMainWindow):
         if not parent.is_dir():
             self.show_error(tr("Выберите существующую папку для нового проекта."))
             return False
-        name = (paths[0].stem[:80].rstrip(" .") or tr("Новый проект")) + "_SculptCut"
+        name = (paths[0].stem[:80].rstrip(" .") or tr("Новый проект")) + "_ArtLapse"
         root = parent / name
         suffix = 2
         while root.exists():
@@ -2203,6 +2213,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "cut_button"):
             self.cut_button.setVisible(has_output)
             self.cut_section.setVisible(has_output)
+        self.update_intro_controls()
 
     def listed_source_paths(self) -> list[Path]:
         return [
@@ -2440,6 +2451,29 @@ class MainWindow(QMainWindow):
             + "} QPushButton:hover { background:#314155; border:1px solid #647f9b; }"
             " QPushButton:focus { border:1px solid #8cbcff; }"
         )
+        self.update_intro_controls()
+
+    def update_intro_controls(self) -> None:
+        if not hasattr(self, "intro_label"):
+            return
+        active = self.presentation_video is not None
+        hint = tr(
+            "Выбрано презентационное видео. Отключите презентацию, чтобы использовать заставку."
+        )
+        self.intro_label.setText(tr("Заставка · не используется") if active else tr("Заставка"))
+        self.intro_label.setToolTip(hint if active else "")
+        self.intro_image.setEnabled(not active and self.job is None)
+        self.intro_preview.setEnabled(not active)
+        self.intro_image.setPlaceholderText(
+            tr("Используется презентационное видео") if active
+            else tr("Нажмите, чтобы выбрать PNG/JPG")
+        )
+        self.intro_image.setToolTip(
+            hint if active else tr("Нажмите на поле, чтобы выбрать другую заставку; × — очистить")
+        )
+        if active and hasattr(self, "change_intro_button"):
+            self.change_intro_button.setEnabled(False)
+            self.change_intro_button.setToolTip(hint)
 
     def choose_presentation(self) -> None:
         if self.job:
@@ -2471,6 +2505,11 @@ class MainWindow(QMainWindow):
         dialog.deleteLater()
 
     def choose_intro_image(self) -> None:
+        if self.presentation_video is not None:
+            self.status.setText(tr(
+                "Выбрано презентационное видео. Отключите презентацию, чтобы использовать заставку."
+            ))
+            return
         path, _ = QFileDialog.getOpenFileName(
             self,
             tr("Выберите изображение заставки"),
@@ -2506,6 +2545,9 @@ class MainWindow(QMainWindow):
             self.another_music()
 
     def change_intro_from_button(self) -> None:
+        if self.presentation_video is not None:
+            self.choose_intro_image()
+            return
         image = Path(self.intro_image.text().strip()) if self.intro_image.text().strip() else None
         if image is None or not image.is_file():
             self.choose_intro_image()
@@ -2580,6 +2622,9 @@ class MainWindow(QMainWindow):
 
     def another_intro(self) -> None:
         if self.job:
+            return
+        if self.presentation_video is not None:
+            self.choose_intro_image()
             return
         if self.find_missing_sources(self.another_intro):
             return
@@ -2856,14 +2901,32 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError) as exc:
             self.show_error(str(exc))
             return
-        refill_short = bool(
-            snapshot_project is not None
-            and snapshot_project.settings.preset in ("shorts", "photoshop_shorts")
-        )
+        if snapshot_project is None or not snapshot.get("plan"):
+            unavailable = tr("У этой версии нет монтажного плана. Доступна обычная подрезка.")
+        elif snapshot.get("operation") == "cut":
+            unavailable = tr("Для сохранения длительности выберите версию до обычной подрезки.")
+        elif snapshot_project.settings.preset not in ("shorts", "photoshop_shorts"):
+            unavailable = tr("В этом режиме сохранение длительности пока недоступно.")
+        else:
+            from sculptcut.shorts_refill import refill_plan_after_cuts
+
+            try:
+                refill_plan_after_cuts(
+                    snapshot_project, RenderPlan.model_validate(snapshot["plan"]), cuts,
+                )
+                unavailable = ""
+            except ValueError as exc:
+                unavailable = error_text(str(exc))
+        dialog = CutSaveDialog(unavailable, self)
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        refill_short = dialog.keep_duration
+        dialog.deleteLater()
+        if not accepted:
+            return
         root = Path(self.folder.text().strip()).resolve()
         self.player.pause()
         self.export_note = (
-            tr(" Вырезки применены; шортс достроен до полной минуты. Предыдущая версия сохранена.")
+            tr(" Вырезки применены; длительность сохранена. Предыдущая версия сохранена.")
             if refill_short
             else tr(" Вырезки применены; предыдущая версия сохранена.")
         )
@@ -2874,7 +2937,7 @@ class MainWindow(QMainWindow):
             if refill_short:
                 from sculptcut.shorts_refill import rebuild_short_after_cuts
 
-                stage(tr("Применяем вырезки и достраиваем шортс до полной минуты"))
+                stage(tr("Применяем вырезки и сохраняем длительность"))
                 return str(rebuild_short_after_cuts(root, video, cuts, cancel, progress))
             from sculptcut.output_cuts import cut_output
 
@@ -2887,7 +2950,7 @@ class MainWindow(QMainWindow):
         self.job.stage.connect(self.show_stage)
         self.job.finished.connect(self.job_finished)
         self.begin_job(
-            tr("Применяем вырезки и достраиваем шортс до полной минуты…")
+            tr("Применяем вырезки и сохраняем длительность…")
             if refill_short
             else tr("Сохраняем вырезки в отдельный MP4…")
         )
@@ -3004,7 +3067,7 @@ class MainWindow(QMainWindow):
     def handle_close_request(self, event: QCloseEvent) -> None:
         if self.job:
             confirmed = self.confirm_action(
-                tr("Закрыть SculptCut?"),
+                tr("Закрыть ArtLapse?"),
                 tr("Обработка будет отменена, а окно закроется после безопасной остановки."),
                 tr("Отменить и закрыть"),
                 tr("Продолжить обработку"),
@@ -3023,7 +3086,7 @@ class MainWindow(QMainWindow):
             self.finish_close(event)
             return
         if self.confirm_action(
-            tr("Закрыть SculptCut?"),
+            tr("Закрыть ArtLapse?"),
             tr("Закрыть приложение? Настройки формы сохранятся для восстановления; "
             "проект сохраняется кнопкой «Сохранить»."),
             tr("Закрыть приложение"),
@@ -3088,7 +3151,8 @@ class MainWindow(QMainWindow):
                 raise ValueError(tr("Для шортса под музыку выберите файл или папку с музыкой."))
             intro = (Path(self.intro_image.text()).resolve()
                      if self.intro_image.text().strip() else None)
-            if intro and (not intro.is_file() or QPixmap(str(intro)).isNull()):
+            if (self.presentation_video is None and intro
+                    and (not intro.is_file() or QPixmap(str(intro)).isNull())):
                 raise ValueError(
                     tr("Выберите существующее изображение заставки или очистите поле.")
                 )
@@ -3194,7 +3258,7 @@ class MainWindow(QMainWindow):
         intro_image = (
             Path(self.intro_image.text()).resolve() if self.intro_image.text().strip() else None
         )
-        if intro_image is not None and (
+        if self.presentation_video is None and intro_image is not None and (
             not intro_image.is_file() or QPixmap(str(intro_image)).isNull()
         ):
             self.show_error(tr("Выберите существующее изображение заставки или очистите поле."))
@@ -3215,7 +3279,7 @@ class MainWindow(QMainWindow):
             cancel: Event, progress: Callable[[float], None], stage: Callable[[str], None]
         ) -> str:
             def phase(message: str) -> None:
-                logging.getLogger("sculptcut").info(message, extra={"event": "job_stage"})
+                logging.getLogger("artlapse").info(message, extra={"event": "job_stage"})
                 stage(message)
                 progress(-1)
 
@@ -3262,7 +3326,9 @@ class MainWindow(QMainWindow):
                 project.model_dump() | {"settings": settings}
             )
             save_project(root, project)
-            needs_analysis = preset not in ("speed", "photoshop_shorts", "photoshop_beat_shorts")
+            needs_analysis = preset not in (
+                "speed", "photoshop_shorts", "photoshop_beat_shorts", "photoshop_music_shorts",
+            )
             if needs_analysis:
                 connection = database(root)
                 try:
@@ -3441,7 +3507,7 @@ class MainWindow(QMainWindow):
                         path.parent.parent, project.model_copy(update={"settings": settings}),
                     )
                 except (OSError, ValueError) as exc:
-                    logging.getLogger("sculptcut").warning(
+                    logging.getLogger("artlapse").warning(
                         "Video saved, but next music selection could not be persisted: %s", exc,
                     )
                     self.status.setText(
@@ -3509,9 +3575,11 @@ class MainWindow(QMainWindow):
 
 def main() -> int:
     configure_logging()
+    from sculptcut.application_identity import configure_application_identity
     from sculptcut.performance import configure_analysis_threads
 
     configure_analysis_threads()
+    configure_application_identity()
     application = QApplication(sys.argv)
     window = MainWindow()
     window.show()

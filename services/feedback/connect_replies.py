@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 
 from sculptcut.ui_theme import STYLE, show_notice, style_setup_dialog
 
-RECEIVER = "https://your-feedback-worker.example"
+RECEIVER = "https://sculptcut-feedback.dmitriyermolenko81.workers.dev"
 SECRET_LABEL = b"SculptCut Telegram webhook v1"
 Transport = Callable[[str, dict[str, object] | None], dict[str, object]]
 
@@ -112,7 +112,7 @@ def main() -> None:
     app = QApplication.instance() or QApplication([])
     app.setStyleSheet(STYLE)
     dialog = QInputDialog()
-    dialog.setWindowTitle("Ответы через Telegram — SculptCut")
+    dialog.setWindowTitle("Ответы через Telegram — ArtLapse")
     dialog.setLabelText(
         "Сначала обновите таблицы D1 и код Worker в Cloudflare.\n"
         "Вставьте ключ @SculptCut_bot из BotFather.\n"
@@ -136,7 +136,7 @@ def main() -> None:
     token = dialog.textValue().strip()
     dialog.setTextValue("")
     progress = QProgressDialog("Подключаем ответы через @SculptCut_bot…", "Отмена", 0, 0)
-    progress.setWindowTitle("SculptCut")
+    progress.setWindowTitle("ArtLapse")
     progress.setMinimumDuration(0)
     progress.show()
     try:
@@ -148,7 +148,7 @@ def main() -> None:
         progress.close()
         show_notice(None, "Ответы подключены",
                                 "Telegram подтвердил подключение.\n\n"
-                                "В SculptCut отправьте отзыв с галочкой ответа, откройте бота "
+                                "В ArtLapse отправьте отзыв с галочкой ответа, откройте бота "
                                 "и нажмите «Начать». Затем ответьте на отзыв в группе "
                                 "от своего личного аккаунта владельца группы.")
     finally:

@@ -5,7 +5,7 @@ import cv2
 import pytest
 
 from sculptcut.domain import Project, ProjectSettings
-from sculptcut.intro import body_start_frame, output_frame_count
+from sculptcut.intro import body_start_frame, intro_frames, intro_signature, output_frame_count
 from sculptcut.media import Cancelled, discover, probe, run_process
 from sculptcut.planning import build_plan, validate_plan
 from sculptcut.presentation import attach_presentation
@@ -56,12 +56,18 @@ def test_full_turnaround_retimed_and_placed_without_changing_originals(
     assert [fingerprint(p) for p in clips] == before
 
 
+@pytest.mark.parametrize("position", ["start", "end"])
 def test_render_preview_music_intro_snapshot_and_plan_invalidation(
-    clips: tuple[Path, Path], tmp_path: Path,
+    clips: tuple[Path, Path], tmp_path: Path, position: str, caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import logging
+
     from test_intro import make_image
 
     body, clip = clips
+    monkeypatch.setattr(logging.getLogger("artlapse"), "propagate", True)
+    caplog.set_level("INFO", logger="artlapse")
     root = tmp_path / "project"
     project = create_project(root, [body])
     image, music = tmp_path / "cover.png", tmp_path / "music.wav"
@@ -70,26 +76,145 @@ def test_render_preview_music_intro_snapshot_and_plan_invalidation(
                  "sine=frequency=440:duration=4", str(music)])
     settings = ProjectSettings(preset="speed", intro_image=image, intro_seconds=.5,
                                intro_transition_seconds=.1, music_path=music,
-                               presentation_video=clip, presentation_seconds=.5)
+                               presentation_video=clip, presentation_seconds=.5,
+                               presentation_position=position)
     project = project.model_copy(update={"settings": settings})
     save_project(root, project)
     plan = build_plan(project, [], 1)
-    assert body_start_frame(settings, 30, 30) == 27
+    assert body_start_frame(settings, 30, 30) == (15 if position == "start" else 0)
     expected = output_frame_count(settings, 30, plan.actual_frame_count)
+    assert expected == 45
     make_proxies(root, project)
     output = render(root, project, plan, tmp_path / "export.mp4", encoder="libx264")
     verify_output(output, expected, 30, expected_audio=True)
     preview = render(root, project, plan, tmp_path / "preview.mp4", preview=True)
     verify_output(preview, expected, 30, expected_audio=True)
+    encoders = [record.getMessage() for record in caplog.records
+                if record.getMessage().startswith("Final video encoder:")]
+    assert encoders == ["Final video encoder: libx264"] * 2
+    for video in (output, preview):
+        capture = cv2.VideoCapture(str(video))
+        try:
+            # Presentation red, then green; montage starts blue. No white cover.
+            for index, channel in ((0, 2 if position == "start" else 0),
+                                   (14 if position == "start" else 44, 1),
+                                   (15 if position == "start" else 30,
+                                    0 if position == "start" else 2)):
+                capture.set(cv2.CAP_PROP_POS_FRAMES, index)
+                ok, frame = capture.read()
+                assert ok
+                h, w = frame.shape[:2]
+                means = frame[h // 3:2 * h // 3, w // 2 - 10:w // 2 + 10].mean(axis=(0, 1))
+                assert means[channel] > 150
+                assert means[channel] > means[(channel + 1) % 3] * 2
+        finally:
+            capture.release()
     assert Project.model_validate(read_variant(output)["project"]).settings == settings
     changed = project.model_copy(update={"settings": settings.model_copy(update={
-        "presentation_position": "end",
+        "presentation_position": "end" if position == "start" else "start",
     })})
     with pytest.raises(ValueError, match="видео-презентация изменились"):
         validate_plan(changed, plan)
     clip.write_bytes(clip.read_bytes() + b"changed")
     with pytest.raises(ValueError, match="видео-презентация изменились"):
         validate_plan(project, plan)
+
+
+def test_inactive_image_is_ignored_and_restored_without_presentation(
+    clips: tuple[Path, Path], tmp_path: Path,
+) -> None:
+    from test_intro import make_image
+
+    from sculptcut.preflight import check_creation
+
+    body, clip = clips
+    image = tmp_path / "missing-cover.png"
+    settings = ProjectSettings(preset="speed", intro_image=image, intro_seconds=.5,
+                               intro_transition_seconds=.1, presentation_video=clip,
+                               presentation_seconds=.5)
+    root = tmp_path / "project"
+    project = create_project(root, [body]).model_copy(update={"settings": settings})
+    save_project(root, project)
+    check_creation(root, [body], settings)
+    signature = intro_signature(settings)
+    assert intro_frames(settings, 30, 30) == (0, 0)
+    assert signature == intro_signature(settings.model_copy(update={"intro_image": None}))
+    plan = build_plan(project, [], 1)
+    output = render(root, project, plan, tmp_path / "no-cover.mp4", encoder="libx264")
+    verify_output(output, 45, 30)
+    make_image(image, (220, 220, 220))
+    assert intro_signature(settings) == signature
+    restored = settings.model_copy(update={"presentation_video": None})
+    assert intro_frames(restored, 30, 30) == (15, 3)
+    assert output_frame_count(restored, 30, 30) == 42
+    assert intro_signature(restored) != signature
+    with pytest.raises(ValueError, match="видео-презентация изменились"):
+        validate_plan(project.model_copy(update={"settings": restored}), plan)
+
+
+def test_replace_intro_rejects_presentation_without_changing_variant(
+    clips: tuple[Path, Path], tmp_path: Path,
+) -> None:
+    from test_intro import make_image
+
+    from sculptcut.reintro import replace_intro
+    from sculptcut.variants import save_variant
+
+    body, clip = clips
+    root = tmp_path / "project"
+    settings = ProjectSettings(preset="speed", presentation_video=clip, presentation_seconds=.5)
+    project = create_project(root, [body]).model_copy(update={"settings": settings})
+    save_project(root, project)
+    output = root / "renders" / "original.mp4"
+    output.write_bytes(body.read_bytes())
+    save_variant(output, project=project, plan=build_plan(project, [], 1))
+    image = tmp_path / "cover.png"
+    make_image(image, (220, 220, 220))
+    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="Отключите презентацию"):
+        replace_intro(root, output, image, None, encoder="libx264")
+    assert {p: p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
+
+
+def test_gui_creation_accepts_missing_inactive_image(
+    clips: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from time import monotonic, sleep
+
+    from PySide6.QtWidgets import QApplication
+
+    from sculptcut.ui import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    body, clip = clips
+    window = MainWindow()
+    continued: list[str] = []
+    monkeypatch.setattr(window, "_start_checked_action", continued.append)
+    try:
+        window.show()
+        window.folder.setText(str(tmp_path / "project"))
+        window.set_sources([body, clip])
+        window.intro_image.setText(str(tmp_path / "missing-cover.png"))
+        window.restore_presentation(ProjectSettings(presentation_video=clip))
+        window.output_name.setText("priority")
+        window.preset.setCurrentIndex(window.preset.findData("speed"))
+        window.create_button.click()
+        assert window.job is not None and window.job.objectName() == "preflight"
+        deadline = monotonic() + 20
+        while (window.job or not continued) and monotonic() < deadline:
+            app.processEvents()
+            sleep(.01)
+        assert continued == ["create"] and not window.last_error
+        window.restore_presentation(ProjectSettings())
+        window.create_button.click()
+        assert window.job is None
+        assert "изображение заставки" in window.last_error
+    finally:
+        if window.job:
+            window.job.cancel.set()
+            window.job.wait(20000)
+        window.close()
+        app.processEvents()
 
 
 def test_square_fitting_and_cancel(clips: tuple[Path, Path], tmp_path: Path) -> None:
@@ -157,6 +282,7 @@ def test_music_clock_and_manual_cut_match_the_body_after_presentation(
     _, clip = clips
     settings = ProjectSettings(preset="shorts", presentation_video=clip,
                                presentation_position=position, presentation_seconds=5,
+                               intro_image=tmp_path / "missing-cover.png",
                                music_path=clip, beat_sync_enabled=True)
     project = Project(sources=[make_source(0, 0, 120_000_000)], settings=settings)
     plan = build_plan(project, [], 60)
@@ -202,6 +328,7 @@ def test_gui_assign_cancel_save_restore_and_session(
 
     from PySide6.QtCore import QCoreApplication, QEvent, QTimer
     from PySide6.QtWidgets import QApplication
+    from test_intro import make_image
 
     from sculptcut.presentation_dialog import PresentationDialog
     from sculptcut.project import load_project
@@ -212,11 +339,14 @@ def test_gui_assign_cancel_save_restore_and_session(
     app = QApplication.instance() or QApplication([])
     body, clip = clips
     root = tmp_path / "project"
+    image = tmp_path / "cover.png"
+    make_image(image, (220, 220, 220))
     window = MainWindow()
     monkeypatch.setattr(window, "confirm_action", lambda *args: True)
     try:
         window.folder.setText(str(root))
         window.set_sources([body, clip])
+        window.intro_image.setText(str(image))
         window.show()
         app.processEvents()
 
@@ -236,6 +366,15 @@ def test_gui_assign_cancel_save_restore_and_session(
         QTimer.singleShot(20, lambda: configure(True))
         window.presentation_button.click()
         assert window.presentation_video == clip.resolve()
+        assert window.intro_image.text() == str(image)
+        assert not window.intro_image.isEnabled()
+        assert not window.intro_preview.isEnabled()
+        assert not window.change_intro_button.isEnabled()
+        assert window.intro_label.text() == "Заставка · не используется"
+        window.language_button.click()
+        assert window.intro_label.text() == "Intro image · not used"
+        assert "Turn it off" in window.intro_image.toolTip()
+        window.language_button.click()
         assert window.source_paths() == [body.resolve()]
         assert window.listed_source_paths() == [body.resolve(), clip.resolve()]
         assert card.data(PRESENTATION_ROLE) == "В конце · 6 с"
@@ -252,6 +391,8 @@ def test_gui_assign_cancel_save_restore_and_session(
         assert window.job is None and not window.last_error
         saved = load_project(root)
         assert saved.settings.presentation_video == clip.resolve()
+        assert saved.settings.intro_image == image
+        assert not window.intro_image.isEnabled()  # Job completion must keep priority.
         assert saved.settings.presentation_seconds == 6
         assert saved.settings.presentation_position == "end"
         assert saved.settings.presentation_source_index == 1
@@ -260,6 +401,7 @@ def test_gui_assign_cancel_save_restore_and_session(
         window.restore_presentation(ProjectSettings())
         window.open_project_folder(root)
         assert window.presentation_video == clip.resolve()
+        assert window.intro_image.text() == str(image) and not window.intro_image.isEnabled()
         assert window.listed_source_paths() == [body.resolve(), clip.resolve()]
         video = root / "renders" / "version.mp4"
         video.write_bytes(body.read_bytes())
@@ -284,6 +426,9 @@ def test_gui_assign_cancel_save_restore_and_session(
         QTimer.singleShot(20, disable)
         window.presentation_button.click()
         assert window.presentation_video is None
+        assert window.intro_image.isEnabled() and window.intro_preview.isEnabled()
+        assert window.intro_image.text() == str(image)
+        assert window.intro_label.text() == "Заставка"
         assert window.source_paths() == [body.resolve(), clip.resolve()]
 
         QTimer.singleShot(20, lambda: configure(True))

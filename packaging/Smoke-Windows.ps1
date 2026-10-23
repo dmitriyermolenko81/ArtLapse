@@ -18,11 +18,11 @@ if ($portable) {
     $ffmpegPath = (Get-Command ffmpeg -ErrorAction Stop).Source
     $ffprobePath = (Get-Command ffprobe -ErrorAction Stop).Source
 }
-$cli = Join-Path $bundlePath 'sculptcut-cli.exe'
-$gui = Join-Path $bundlePath 'SculptCut.exe'
+$cli = Join-Path $bundlePath 'artlapse-cli.exe'
+$gui = Join-Path $bundlePath 'ArtLapse.exe'
 New-Item -ItemType Directory -Path $workPath -Force | Out-Null
 $oldEnvironment = @{}
-foreach ($key in @('PATH','PYTHONPATH','PYTHONHOME','SCULPTCUT_DATA_DIR',
+foreach ($key in @('PATH','PYTHONPATH','PYTHONHOME','ARTLAPSE_DATA_DIR','ARTLAPSE_FFMPEG','ARTLAPSE_FFPROBE','SCULPTCUT_DATA_DIR',
     'SCULPTCUT_FFMPEG','SCULPTCUT_FFPROBE')) {
     $oldEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
@@ -30,13 +30,16 @@ try {
     $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
     $env:PYTHONPATH = ''
     $env:PYTHONHOME = ''
-    $env:SCULPTCUT_DATA_DIR = Join-Path $workPath 'data'
-    $env:SCULPTCUT_FFMPEG = $ffmpegPath
-    $env:SCULPTCUT_FFPROBE = $ffprobePath
+    $env:SCULPTCUT_DATA_DIR = $null
+    $env:SCULPTCUT_FFMPEG = $null
+    $env:SCULPTCUT_FFPROBE = $null
+    $env:ARTLAPSE_DATA_DIR = Join-Path $workPath 'data'
+    $env:ARTLAPSE_FFMPEG = $ffmpegPath
+    $env:ARTLAPSE_FFPROBE = $ffprobePath
     if ($portable) {
-        $env:SCULPTCUT_DATA_DIR = $null
-        $env:SCULPTCUT_FFMPEG = $null
-        $env:SCULPTCUT_FFPROBE = $null
+        $env:ARTLAPSE_DATA_DIR = $null
+        $env:ARTLAPSE_FFMPEG = $null
+        $env:ARTLAPSE_FFPROBE = $null
     }
     & $cli --version
     if ($LASTEXITCODE -ne 0) { throw 'Frozen CLI failed.' }

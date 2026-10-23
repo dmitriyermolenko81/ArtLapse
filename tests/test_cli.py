@@ -44,15 +44,16 @@ def test_top_level_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert all(command in output for command in EXPECTED_COMMANDS)
 
 
-def test_module_entry_point() -> None:
+@pytest.mark.parametrize("module", ["artlapse", "sculptcut"])
+def test_module_entry_point(module: str) -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "sculptcut", "--version"],
+        [sys.executable, "-m", module, "--version"],
         capture_output=True,
         text=True,
         check=False,
     )
     assert result.returncode == 0
-    assert "sculptcut 0.1.0" in result.stdout
+    assert "artlapse 0.1.0" in result.stdout
 
 
 def test_music_selection_option() -> None:

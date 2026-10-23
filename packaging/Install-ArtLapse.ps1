@@ -1,13 +1,13 @@
 param(
-    [string]$Source = (Join-Path $PSScriptRoot 'SculptCut'),
-    [string]$Destination = (Join-Path $env:LOCALAPPDATA 'Programs\SculptCut'),
+    [string]$Source = (Join-Path $PSScriptRoot 'ArtLapse'),
+    [string]$Destination = (Join-Path $env:LOCALAPPDATA 'Programs\ArtLapse'),
     [string]$SettingsFrom = ''
 )
 $ErrorActionPreference = 'Stop'
 $sourcePath = [IO.Path]::GetFullPath($Source)
 $targetPath = [IO.Path]::GetFullPath($Destination)
-if (-not (Test-Path -LiteralPath (Join-Path $sourcePath 'SculptCut.exe'))) {
-    throw 'Source must contain the complete verified SculptCut onedir build.'
+if (-not (Test-Path -LiteralPath (Join-Path $sourcePath 'ArtLapse.exe'))) {
+    throw 'Source must contain the complete verified ArtLapse onedir build.'
 }
 if ((Test-Path -LiteralPath $targetPath) -and
     (Get-ChildItem -LiteralPath $targetPath -Force | Select-Object -First 1)) {
@@ -43,4 +43,4 @@ if ($settingsPath) {
     New-Item -ItemType Directory -Path $stateDirectory -Force | Out-Null
     Copy-Item -LiteralPath $settingsPath -Destination (Join-Path $stateDirectory 'settings.ini')
 }
-Write-Output "Installed to $targetPath. Open SculptCut.exe. Projects and videos are stored separately."
+Write-Output "Installed to $targetPath. Open ArtLapse.exe. Projects and videos are stored separately."

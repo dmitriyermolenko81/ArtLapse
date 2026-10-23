@@ -42,7 +42,7 @@ class FeedbackDialog(QDialog):
         endpoint: str | None = None, allow_local_http: bool = False,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(tr("Обратная связь — SculptCut"))
+        self.setWindowTitle(tr("Обратная связь — ArtLapse"))
         self.resize(520, 360)
         apply_dialog_theme(self)
         self.settings = settings
@@ -71,7 +71,7 @@ class FeedbackDialog(QDialog):
                            (tr("Другое"), "other")):
             self.kind.addItem(label, key)
         self.kind.setAccessibleName(tr("Тип отзыва"))
-        self.kind.setToolTip(tr("Текст отзыва получат участники группы SculptCut в Telegram."))
+        self.kind.setToolTip(tr("Текст отзыва получат участники группы обратной связи в Telegram."))
         layout.addWidget(self.kind)
         self.message = QTextEdit()
         self.message.setAcceptRichText(False)
@@ -206,7 +206,7 @@ class FeedbackDialog(QDialog):
         self.message.setPlaceholderText({
             "bug": tr("Что произошло? Что вы делали перед этим и какой результат ожидали?"),
             "idea": tr("Что стоит добавить или изменить? Чем это поможет в вашей работе?"),
-            "other": tr("Что хотите рассказать о работе SculptCut?"),
+            "other": tr("Что хотите рассказать о работе ArtLapse?"),
         }[self.kind.currentData()])
         length = len(self.message.toPlainText().strip())
         self.counter.setText(f"{length} / {MAX_MESSAGE}")

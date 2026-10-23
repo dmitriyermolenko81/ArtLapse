@@ -41,6 +41,83 @@ def test_sustained_travel_pans_only_horizontally_without_scale_changes() -> None
     assert min(xs) >= roi.width / 2 and max(xs) <= 1 - roi.width / 2
 
 
+@pytest.mark.parametrize("preset", ["music_shorts", "photoshop_music_shorts"])
+@pytest.mark.parametrize("left", [0.0, 0.12, 0.4])
+def test_music_episode_locks_travel_at_cut_even_if_subject_exceeds_square(
+    preset: str, left: float,
+) -> None:
+    roi = Roi(x=0.3, y=0.2, width=0.4, height=0.6)
+    viewport = Roi(x=0.1, y=0.2, width=0.8, height=0.6)
+    samples = [
+        (1_000_000 + i * 200000, Roi(x=left + i * 0.02, y=0.3, width=0.2, height=0.2))
+        for i in range(20)
+    ]
+    settings = ProjectSettings.model_validate({"preset": preset})
+    camera = horizontal_camera(roi, samples, settings, 1_000_000, 0.35, viewport)
+    assert len(camera.points) == 1
+    point = camera.points[0]
+    assert point.time_us == 1_000_000
+    assert point.x == pytest.approx(max(0.3, min(0.7, left + 0.29)))
+    assert point.y == pytest.approx(0.5)
+    assert camera.width == roi.width and camera.height == roi.height
+    assert point.width is None and point.height is None
+
+
+@pytest.mark.parametrize("preset", ["music_shorts", "photoshop_music_shorts"])
+def test_real_music_square_keeps_background_fixed_in_export_and_preview(
+    tmp_path: Path, preset: str,
+) -> None:
+    source = tmp_path / "episode.mp4"
+    writer = cv2.VideoWriter(str(source), cv2.VideoWriter.fourcc(*"mp4v"), 30, (640, 360))
+    assert writer.isOpened()
+    for index in range(60):
+        frame = np.full((360, 640, 3), 70, dtype=np.uint8)
+        center = round(235 + 170 * index / 59)
+        cv2.ellipse(frame, (center, 210), (90, 100), 0, 0, 360, (210, 210, 210), -1)
+        # A canvas landmark distinguishes added camera motion from source motion.
+        cv2.rectangle(frame, (310, 30), (330, 50), (0, 0, 255), -1)
+        writer.write(frame)
+    writer.release()
+    root = tmp_path / "project"
+    created = create_project(root, [source])
+    sid = created.sources[0].id
+    project = created.model_copy(update={"settings": ProjectSettings.model_validate({
+        "preset": preset, "shorts_layout": "square",
+        "shorts_square_rois": {sid: {"x": 0.21875, "y": 0, "width": 0.5625, "height": 1}},
+    })})
+    raw = build_plan(project, [], 2)
+    plan = apply_square_layout(project, raw, root)
+    assert plan.actual_frame_count == raw.actual_frame_count == 60
+    assert [(d.source_start_us, d.source_end_us, d.output_frame_count) for d in plan.decisions] == [
+        (d.source_start_us, d.source_end_us, d.output_frame_count) for d in raw.decisions
+    ]
+    camera = plan.decisions[0].subject_camera
+    assert camera is not None and len(camera.points) == 1
+    make_proxies(root, project)
+    for preview in (False, True):
+        output = render(root, project, plan, tmp_path / f"fixed-{preview}.mp4",
+                        encoder="libx264", preview=preview)
+        verify_output(output, 60, 30)
+        run_process([discover("ffmpeg"), "-v", "error", "-xerror", "-i", str(output),
+                     "-f", "null", "-"])
+        capture = cv2.VideoCapture(str(output))
+        centers = []
+        try:
+            while True:
+                ok, frame = capture.read()
+                if not ok:
+                    break
+                red = (frame[:, :, 2] > 150) & (frame[:, :, 1] < 70)
+                rows, columns = np.where(red)
+                assert len(columns) > 50
+                centers.append((float(np.mean(columns)), float(np.mean(rows))))
+        finally:
+            capture.release()
+        assert len(centers) == 60
+        assert np.ptp([c[0] for c in centers]) < 1
+        assert np.ptp([c[1] for c in centers]) < 1
+
+
 @pytest.mark.parametrize("canvas_mode", ["full", "detected", "manual"])
 def test_real_square_pan_keeps_moving_object_visible(tmp_path: Path, canvas_mode: str) -> None:
     source = tmp_path / "moving.mp4"

@@ -8,6 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import QCoreApplication, QSettings, QTimer, QUrl
 from PySide6.QtWidgets import QApplication
 
+from sculptcut.application_identity import configure_application_identity, windows_application_id
 from sculptcut.cli import main as cli_main
 from sculptcut.logging_config import configure_logging
 from sculptcut.ui import MainWindow
@@ -26,6 +27,7 @@ def main() -> int:
     args = parser.parse_args()
     configure_logging().info("Desktop smoke started", extra={"event": "startup"})
     args.smoke_directory.mkdir(parents=True, exist_ok=True)
+    configure_application_identity()
     app = QApplication(sys.argv)
     window = MainWindow()
     window.recent_settings = QSettings(
@@ -48,6 +50,10 @@ def main() -> int:
                     "screenshot": saved,
                     "video_frames": frames,
                     "frozen": bool(getattr(sys, "frozen", False)),
+                    "application_id": windows_application_id(),
+                    "application_name": app.applicationName(),
+                    "window_icon_null": window.windowIcon().isNull(),
+                    "icon_sizes": [size.width() for size in window.windowIcon().availableSizes()],
                     "language": window.locale().name(),
                     "create_label": window.create_button.text(),
                     "qt_cancel": QCoreApplication.translate("QPlatformTheme", "Cancel"),

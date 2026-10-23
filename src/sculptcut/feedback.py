@@ -1,7 +1,6 @@
 """Explicit user feedback; payloads contain no project files or automatic logs."""
 
 import json
-import os
 import platform
 import re
 import secrets
@@ -14,7 +13,7 @@ from pydantic import Field
 
 from sculptcut import __version__
 from sculptcut.domain import Model
-from sculptcut.runtime_paths import portable_root
+from sculptcut.runtime_paths import environment_value, portable_root
 
 MAX_MESSAGE = 2400
 MAX_BODY_BYTES = 16_384
@@ -69,7 +68,7 @@ def validate_endpoint(endpoint: str, *, allow_local_http: bool = False) -> str:
 
 
 def feedback_endpoint() -> str:
-    configured = os.environ.get("SCULPTCUT_FEEDBACK_ENDPOINT", "").strip()
+    configured = (environment_value("FEEDBACK_ENDPOINT") or "").strip()
     if not configured:
         root = portable_root()
         config = (root or Path(__file__).resolve().parents[2]) / "feedback-config.json"

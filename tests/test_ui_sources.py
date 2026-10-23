@@ -137,11 +137,12 @@ def test_mode_switches_are_in_settings_header_and_still_switch_modes() -> None:
         for control in (window.preset, window.duration_card, window.music, window.intro_image):
             assert window.mode_settings_panel.isAncestorOf(control)
         buttons = [b for b in window.preset.buttons.values() if b.isVisible()]
-        assert len(buttons) == 5
+        assert len(buttons) == 6
         assert len({b.geometry().top() for b in buttons}) == 1
         assert all(not b.icon().isNull() for b in buttons)
         assert all(b.geometry().right() < window.preset.width() for b in buttons)
-        for preset in ("music_shorts", "beat_shorts", "photoshop_shorts", "photoshop_beat_shorts"):
+        for preset in ("music_shorts", "beat_shorts", "photoshop_shorts", "photoshop_beat_shorts",
+                       "photoshop_music_shorts"):
             button = window.preset.buttons[preset]
             QTest.mouseClick(button, Qt.MouseButton.LeftButton)
             app.processEvents()

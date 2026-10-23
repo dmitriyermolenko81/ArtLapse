@@ -12,9 +12,13 @@ if TYPE_CHECKING:
 
 SQUARE_BACKGROUND = "0x181818"
 SHORTS_PRESETS = (
-    "shorts", "music_shorts", "beat_shorts", "photoshop_shorts", "photoshop_beat_shorts",
+    "shorts", "music_shorts", "beat_shorts", "photoshop_shorts", "photoshop_music_shorts",
+    "photoshop_beat_shorts",
 )
-MUSIC_SHORTS_PRESETS = ("music_shorts", "beat_shorts", "photoshop_beat_shorts")
+MUSIC_SHORTS_PRESETS = (
+    "music_shorts", "beat_shorts", "photoshop_beat_shorts", "photoshop_music_shorts",
+)
+PHOTOSHOP_PRESETS = ("photoshop_shorts", "photoshop_beat_shorts", "photoshop_music_shorts")
 
 
 def uses_square(settings: ProjectSettings) -> bool:

@@ -70,7 +70,7 @@ export async function deliver(request, env, fetchTelegram = fetch) {
         .bind().first();
       repliesReady = true;
     } catch { /* Old feedback still works before the additive schema upgrade. */ }
-    return reply(200, {service: "SculptCut feedback", revision: 4,
+    return reply(200, {service: "ArtLapse feedback", revision: 4,
       telegram_replies: repliesReady, ready: Boolean(
         env.DB && env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID)});
   }
@@ -262,12 +262,12 @@ async function handlePrivate(env, message, now, fetchTelegram) {
       }
     }
     await sendReply(env, chatId, "Ссылка недействительна, истекла или уже использована. " +
-      "Откройте ссылку из своей формы SculptCut.", fetchTelegram);
+      "Откройте ссылку из своей формы ArtLapse.", fetchTelegram);
     return;
   }
   const ticket = await ticketForMessage(env, message, now);
   if (content.startsWith("/") || !ticket) {
-    await sendReply(env, chatId, "Для ответа отправьте отзыв в SculptCut, выберите ответы " +
+    await sendReply(env, chatId, "Для ответа отправьте отзыв в ArtLapse, выберите ответы " +
       "через Telegram и откройте персональную ссылку после отправки. Отключение: /stop.", fetchTelegram);
     return;
   }

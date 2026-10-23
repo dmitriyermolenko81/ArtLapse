@@ -6,13 +6,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from fractions import Fraction
 from pathlib import Path
 from threading import Event
 
-from sculptcut.runtime_paths import portable_root
+from sculptcut.runtime_paths import environment_value, portable_root
 
 
 class MediaError(RuntimeError):
@@ -32,7 +33,7 @@ def discover(name: str, configured: Path | None = None) -> str:
                 f"Portable component missing: {candidate}; unpack the complete archive"
             )
         return str(candidate)
-    explicit = configured or os.environ.get(f"SCULPTCUT_{name.upper()}")
+    explicit = configured or environment_value(name.upper())
     if explicit:
         path = Path(explicit)
         if not path.is_file():
@@ -44,7 +45,7 @@ def discover(name: str, configured: Path | None = None) -> str:
             return str(candidate)
     found = shutil.which(name)
     if not found:
-        raise MediaError(f"{name} not found; set SCULPTCUT_{name.upper()} or PATH")
+        raise MediaError(f"{name} not found; set ARTLAPSE_{name.upper()} or PATH")
     return found
 
 
@@ -62,8 +63,27 @@ def run_process(
     """
     if cancel is not None and cancel.is_set():
         raise Cancelled("Cancelled before launch")
-    with tempfile.TemporaryDirectory(prefix="sculptcut-process-") as directory:
-        return _execute(args, cancel, progress, Path(directory), heartbeat, diagnostic_progress)
+    temporary = tempfile.TemporaryDirectory(prefix="sculptcut-process-")
+    try:
+        return _execute(
+            args, cancel, progress, Path(temporary.name), heartbeat, diagnostic_progress,
+        )
+    finally:
+        _cleanup_process_directory(temporary)
+
+
+def _cleanup_process_directory(temporary: tempfile.TemporaryDirectory[str]) -> None:
+    # Windows can retain an inherited stdout/stderr handle briefly after taskkill
+    # returns. Python 3.10 may turn that sharing violation into WinError 267.
+    # Retry for at most one second; persistent or unrelated errors still surface.
+    for attempt in range(21):
+        try:
+            temporary.cleanup()
+            return
+        except OSError as exc:
+            if os.name != "nt" or exc.winerror not in (5, 32, 267) or attempt == 20:
+                raise
+            time.sleep(0.05)
 
 
 def _execute(

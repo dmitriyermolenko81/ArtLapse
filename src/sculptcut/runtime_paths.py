@@ -5,6 +5,11 @@ import sys
 from pathlib import Path
 
 
+def environment_value(name: str) -> str | None:
+    """Prefer ArtLapse configuration while accepting existing local launch scripts."""
+    return os.environ.get(f"ARTLAPSE_{name}") or os.environ.get(f"SCULPTCUT_{name}")
+
+
 def portable_root() -> Path | None:
     root = Path(sys.executable).resolve().parent
     if getattr(sys, "frozen", False) and (root / "portable.txt").is_file():
@@ -13,12 +18,15 @@ def portable_root() -> Path | None:
 
 
 def data_directory() -> Path | None:
-    configured = os.environ.get("SCULPTCUT_DATA_DIR")
+    configured = environment_value("DATA_DIR")
     if configured:
         return Path(configured)
     root = portable_root()
     if root is not None:
         return root / "data"
     if getattr(sys, "frozen", False):
-        return Path(os.environ["LOCALAPPDATA"]) / "SculptCut"
+        local = Path(os.environ["LOCALAPPDATA"])
+        current, legacy = local / "ArtLapse", local / "SculptCut"
+        # Never move or hide existing non-portable users' preferences and diagnostics.
+        return legacy if not current.exists() and legacy.is_dir() else current
     return None

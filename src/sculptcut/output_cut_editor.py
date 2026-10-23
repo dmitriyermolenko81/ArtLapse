@@ -257,7 +257,7 @@ class OutputCutEditor(QWidget):
         actions.addStretch(1)
         self.save_button = QPushButton(tr("Сохранить копию"))
         self.save_button.setObjectName("primary")
-        self.save_button.setToolTip(tr("Сохранить подрезку в новый файл. Оригинал сохранится."))
+        self.save_button.setToolTip(tr("Выбрать способ подрезки и сохранить в новый файл"))
         self.save_button.clicked.connect(self.save_requested.emit)
         actions.addWidget(self.save_button)
         layout.addLayout(actions)

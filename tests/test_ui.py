@@ -9,7 +9,6 @@ from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMessageBox
 
 from sculptcut.domain import Override, ProjectSettings
-from sculptcut.intro import output_frame_count
 from sculptcut.media import discover, run_process
 from sculptcut.project import create_project, load_project, save_project
 from sculptcut.rendering import verify_output
@@ -250,7 +249,9 @@ def test_gui_real_pipeline_and_responsiveness(
             assert not list((root / "previews").glob("*.mp4"))
             assert "Rendering preview" not in stages
             assert stages.count("Rendering MP4 from originals") == 1
-        expected_frames = output_frame_count(saved.settings, 30, 180)
+        expected_frames = round(saved.settings.target_seconds * saved.settings.output_fps)
+        assert expected_frames == 180  # Selected six seconds include the intro.
+        assert "Ролик: 00:06" in window.statistics.text()
         verify_output(
             root
             / "renders"
@@ -324,7 +325,7 @@ def test_cancel_and_close_require_confirmation(monkeypatch: pytest.MonkeyPatch) 
         window.handle_close_request(close_event)
         assert not close_event.isAccepted()
         assert not window.close_after_job
-        assert [prompt[0] for prompt in prompts] == ["Отменить обработку?", "Закрыть SculptCut?"]
+        assert [prompt[0] for prompt in prompts] == ["Отменить обработку?", "Закрыть ArtLapse?"]
 
         monkeypatch.setattr(window, "confirm_action", lambda *_: True)
         window.cancel_job()
@@ -359,7 +360,7 @@ def test_idle_window_closes_without_confirmation(monkeypatch: pytest.MonkeyPatch
     changed_event = QCloseEvent()
     changed.handle_close_request(changed_event)
     assert not changed_event.isAccepted()
-    assert prompts == ["Закрыть SculptCut?"]
+    assert prompts == ["Закрыть ArtLapse?"]
     window.close()
     changed.close()
     app.processEvents()

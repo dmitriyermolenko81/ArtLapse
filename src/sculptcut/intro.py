@@ -1,5 +1,6 @@
 """Optional still-image intro shared by preview and original-source export."""
 
+import math
 import tempfile
 from pathlib import Path
 from threading import Event
@@ -11,9 +12,14 @@ from sculptcut.project import fingerprint
 from sculptcut.shorts_layout import SQUARE_BACKGROUND, uses_square
 
 
+def active_intro_image(settings: ProjectSettings) -> Path | None:
+    """Keep the saved image while a selected presentation takes precedence."""
+    return None if settings.presentation_video is not None else settings.intro_image
+
+
 def intro_signature(settings: ProjectSettings) -> str:
     presentation = presentation_signature(settings)
-    image = settings.intro_image
+    image = active_intro_image(settings)
     if image is None:
         return presentation
     if not image.is_file():
@@ -31,7 +37,7 @@ def intro_signature(settings: ProjectSettings) -> str:
 
 def intro_frames(settings: ProjectSettings, fps: int, body_frames: int) -> tuple[int, int]:
     """Return still and overlap frame counts, or zeroes when no intro is selected."""
-    if settings.intro_image is None:
+    if active_intro_image(settings) is None:
         return 0, 0
     still = max(2, round(settings.intro_seconds * fps))
     overlap = min(still - 1, body_frames, max(1, round(settings.intro_transition_seconds * fps)))
@@ -41,6 +47,22 @@ def intro_frames(settings: ProjectSettings, fps: int, body_frames: int) -> tuple
 def output_frame_count(settings: ProjectSettings, fps: int, body_frames: int) -> int:
     still, overlap = intro_frames(settings, fps, body_frames)
     return body_frames + still - overlap + presentation_frames(settings, fps)
+
+
+def body_frame_budget(settings: ProjectSettings, fps: int, total_seconds: float) -> int:
+    """Reserve bookends inside a user-requested total, on the integer output clock."""
+    if not math.isfinite(total_seconds) or total_seconds <= 0:
+        raise ValueError("Target duration must be positive and finite")
+    total = max(1, round(total_seconds * fps))
+    presentation = presentation_frames(settings, fps)
+    still, overlap = intro_frames(settings, fps, total)
+    body = total - presentation - still + overlap
+    if body <= 0 or output_frame_count(settings, fps, body) != total:
+        raise ValueError(
+            "Заданного времени не хватает на заставку или презентацию и основной монтаж. "
+            "Увеличьте длительность ролика или сократите заставку/презентацию."
+        )
+    return body
 
 
 def body_start_frame(settings: ProjectSettings, fps: int, body_frames: int) -> int:

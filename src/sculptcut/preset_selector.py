@@ -14,6 +14,7 @@ PRESENTATION: dict[str, tuple[str, IconName]] = {
     "music_shorts": ("Эпизоды", "episodes_music"),
     "beat_shorts": ("Музыка", "portrait_music"),
     "photoshop_shorts": ("Ps 9:16", "drawing"),
+    "photoshop_music_shorts": ("Ps эпизоды", "episodes_music"),
     "photoshop_beat_shorts": ("Ps музыка", "drawing_music"),
     "auto": ("9:16", "layout_portrait"),
     "square": ("1:1 с полями", "layout_square"),
@@ -30,6 +31,7 @@ PRESET_DESCRIPTIONS = {
     "beat_shorts": "Стоп-кадры сменяются в ритме выбранной музыки.",
     "speed": "Вся запись ускоряется без удаления участков.",
     "photoshop_shorts": "Вертикальный монтаж с камерой внутри холста.",
+    "photoshop_music_shorts": "Движущиеся эпизоды рисования сменяются под музыкальные акценты.",
     "photoshop_beat_shorts": "Стадии рисунка сменяются под музыку; рамка неподвижна.",
 }
 
@@ -39,6 +41,7 @@ PRESET_ACCENTS = {
     "shorts": ("#79ded0", "#1d4949", "#263e42"),
     "music_shorts": ("#ffd28c", "#59422c", "#42392d"),
     "photoshop_shorts": ("#79ded0", "#1d4949", "#263e42"),
+    "photoshop_music_shorts": ("#ffd28c", "#59422c", "#42392d"),
     "beat_shorts": ("#c7a5f5", "#44335e", "#353044"),
     "photoshop_beat_shorts": ("#c7a5f5", "#44335e", "#353044"),
 }
@@ -124,7 +127,7 @@ class PresetSelector(QWidget):
             button.setAccessibleName(title)
         description = tr(PRESET_DESCRIPTIONS.get(value, ""))
         button.setToolTip(f"{title}\n{description}" if description else title)
-        button.setMinimumSize(52, 52)
+        button.setMinimumSize(44, 52)
         button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._group.addButton(button, len(self._items))
         self._items.append((title, value))

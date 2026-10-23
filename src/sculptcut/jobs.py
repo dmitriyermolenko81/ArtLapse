@@ -12,9 +12,9 @@ from sculptcut.project import atomic_write, cache_key, fingerprint
 def render_job(destination: Path, plan: RenderPlan, encoder: str, preview: bool) -> Path:
     payload = plan.model_dump()
     payload["settings"].pop("request_key", None)
-    # Do not resume chunks whose frame clock restarted at a resolution change.
+    # Execution batches differ from earlier one-decision receipts.
     key = cache_key(
-        "render-job-8-stable-input-clock", payload, encoder, preview, str(destination.resolve())
+        "render-job-9-compatible-batches", payload, encoder, preview, str(destination.resolve())
     )
     directory = metadata_directory(destination) / ".sculptcut-jobs" / key
     if directory.parent.is_symlink() or directory.is_symlink():

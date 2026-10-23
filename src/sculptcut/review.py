@@ -160,7 +160,7 @@ def review_html(root: Path, project: Project, cancel: Event | None = None) -> Pa
     atomic_write(
         destination,
         tr('<!doctype html><html lang="ru"><meta charset="utf-8">'
-        "<title>SculptCut — проверка фрагментов</title>"
+        "<title>ArtLapse — проверка фрагментов</title>"
         "<style>body{background:#15171b;color:#eee;font:16px system-ui;"
         "max-width:1000px;margin:40px auto}"
         "article{padding:24px;margin:20px 0;background:#20232a;"

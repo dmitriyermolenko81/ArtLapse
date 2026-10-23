@@ -14,14 +14,16 @@ from sculptcut.audio import add_music, validate_music
 from sculptcut.bookends import bookend_filter, final_frames
 from sculptcut.domain import Project, Roi
 from sculptcut.export_storage import metadata_path
-from sculptcut.intro import output_frame_count, prepend_intro
+from sculptcut.intro import active_intro_image, output_frame_count, prepend_intro
 from sculptcut.jobs import finish_job, record_chunk, render_job, reusable_chunk
-from sculptcut.media import Cancelled, MediaError, discover, doctor, probe, run_process
+from sculptcut.media import Cancelled, MediaError, discover, doctor, parse_probe, probe, run_process
 from sculptcut.music_library import soundtrack
 from sculptcut.planning import RenderDecision, RenderPlan, validate_plan
 from sculptcut.presentation import attach_presentation, presentation_frames
 from sculptcut.project import atomic_write, validate_sources
 from sculptcut.proxy import proxy_path
+from sculptcut.render_batches import coalesce_chunks
+from sculptcut.screen_cache import screen_check_cache
 from sculptcut.shorts_layout import SHORTS_PRESETS, square_composition, uses_square
 from sculptcut.subject_camera import camera_filter, still_frame
 
@@ -74,6 +76,7 @@ def normalize_timing(
     screen_guard: bool = False,
     bookend_plan: RenderPlan | None = None,
     square_bands: bool = False,
+    encoder: str = "auto",
 ) -> list[int]:
     """Rebuild the frame clock, optionally replacing brief menu flashes.
 
@@ -104,15 +107,17 @@ def normalize_timing(
     with tempfile.TemporaryDirectory(prefix="clock-", dir=destination.parent) as scratch:
         script = Path(scratch) / "filter.txt"
         script.write_text(filters, encoding="utf-8")
-        encoder = "h264_nvenc" if doctor().get("h264_nvenc") else "libx264"
+        automatic = encoder == "auto"
+        if automatic:
+            encoder = "h264_nvenc" if doctor().get("h264_nvenc") else "libx264"
         try:
             _normalize(source, destination, fps, script, cancel, encoder)
         except Cancelled:
             raise
         except MediaError:
-            if encoder == "libx264":
+            if encoder == "libx264" or not automatic:
                 raise
-            logging.getLogger("sculptcut").warning("Final NVENC failed; retrying with CPU")
+            logging.getLogger("artlapse").warning("Final NVENC failed; retrying with CPU")
             destination.unlink(missing_ok=True)
             _normalize(source, destination, fps, script, cancel, "libx264")
     return rejected
@@ -126,7 +131,7 @@ def _normalize(
     cancel: Event | None,
     encoder: str = "libx264",
 ) -> None:
-    logging.getLogger("sculptcut").info("Final video encoder: %s", encoder)
+    logging.getLogger("artlapse").info("Final video encoder: %s", encoder)
     quality = (
         ["-preset", "p4", "-rc", "vbr", "-cq", str(FINAL_CRF), "-b:v", "0"]
         if encoder == "h264_nvenc"
@@ -168,7 +173,11 @@ def _normalize(
 def verify_output(
     path: Path, frames: int, fps: int, cancel: Event | None = None, expected_audio: bool = False
 ) -> None:
-    info = probe(path)
+    metadata_text = run_process([
+        discover("ffprobe"), "-v", "error", "-count_frames", "-show_streams",
+        "-show_format", "-of", "json", str(path),
+    ], cancel)
+    info = parse_probe(metadata_text, path)
     if (
         info.duration_us is None
         or abs(info.duration_us - frames * 1_000_000 / fps) > 1_000_000 / fps
@@ -179,25 +188,13 @@ def verify_output(
         )
     if bool(info.audio_streams) != expected_audio:
         raise MediaError("Rendered audio stream does not match settings")
-    metadata = json.loads(
-        run_process(
-            [
-                discover("ffprobe"),
-                "-v",
-                "error",
-                "-count_frames",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "stream=nb_read_frames",
-                "-of",
-                "json",
-                str(path),
-            ],
-            cancel,
-        )
-    )
-    if int(metadata["streams"][0]["nb_read_frames"]) != frames:
+    metadata = json.loads(metadata_text)
+    stream = next(row for row in metadata["streams"] if row["index"] == info.stream_index)
+    try:
+        counted = int(stream["nb_read_frames"])
+    except (KeyError, ValueError, TypeError) as exc:
+        raise MediaError("Cannot count rendered video frames") from exc
+    if counted != frames:
         raise MediaError("Rendered frame count differs from plan")
     run_process(
         [discover("ffmpeg"), "-v", "error", "-xerror", "-i", str(path), "-f", "null", "-"], cancel
@@ -253,6 +250,7 @@ def chunk_decisions(plan: RenderPlan) -> list[RenderDecision]:
     return result
 
 
+@screen_check_cache()
 def render(
     root: Path,
     project: Project,
@@ -353,7 +351,8 @@ def _render(
         temporary = Path(directory)
         names = []
         completed = 0
-        for index, decision in enumerate(chunk_decisions(plan)):
+        batches = coalesce_chunks(chunk_decisions(plan), sources, fps)
+        for index, decision in enumerate(batches):
             name = f"chunk-{index:06d}.mp4"
             if reusable_chunk(temporary, name):
                 names.append(name)
@@ -522,17 +521,18 @@ def _render(
             screen_guard=plan.settings.get("story") == "process",
             bookend_plan=plan,
             square_bands=square,
+            encoder=encoder,
         )
         combined = normalized
         if progress:
             progress(0.95)
         verify_output(combined, plan.actual_frame_count, fps, cancel)
-        if project.settings.intro_image is not None:
+        if (image := active_intro_image(project.settings)) is not None:
             intro = temporary / "intro.mp4"
             intro.unlink(missing_ok=True)
             prepend_intro(
                 combined,
-                project.settings.intro_image,
+                image,
                 intro,
                 width=width,
                 height=height,

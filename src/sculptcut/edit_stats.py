@@ -47,11 +47,12 @@ def statistics_text(plan: RenderPlan) -> str:
         return format_time(us / 1_000_000)
 
     percent = removed / total * 100 if total else 0
+    output_frames = int(plan.settings.get("actual_output_frames", plan.actual_frame_count))
     text = (
         tr(f"Последний расчёт · Исходники: {duration(total)} · "
         f"Вырезано: {duration(removed)} ({percent:.1f}%) · "
         f"Оставлено: {duration(total - removed)} · "
-        f"Ролик: {duration(round(plan.actual_frame_count / plan.output_fps * 1_000_000))} · "
+        f"Ролик: {duration(round(output_frames / plan.output_fps * 1_000_000))} · "
         f"Эпизодов: {_episode_count(plan)}")
     )
     if any(d.action == "MONTAGE" for d in plan.decisions):

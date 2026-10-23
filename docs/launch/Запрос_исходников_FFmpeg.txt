@@ -1,0 +1,57 @@
+ПОЛУЧАТЕЛЬ: builds@gyan.dev
+ТЕМА: Corresponding source request — FFmpeg 8.1.2 full build for ArtLapse
+
+Адрес указан на официальной странице https://www.gyan.dev/ffmpeg/builds/
+(раздел Notes: builds at this domain). В существующих обсуждениях сборщик
+просит обращаться с официальной почты автора приложения:
+https://github.com/GyanD/codexffmpeg/issues/246#issuecomment-6141911951
+https://github.com/GyanD/codexffmpeg/issues/249#issuecomment-6264377917
+
+Отправить со своей обычной почты разработчика. Отдельная компания и покупка
+коммерческой лицензии этим письмом не заявляются. Ниже — готовый текст;
+письмо ещё НЕ отправлялось. Никакие видео, ключи и исходники ArtLapse
+прикладывать не требуется. Наш репозиторий пока приватный — так и указано.
+
+----- текст письма -----
+
+Hello Gyan,
+
+I am an independent developer preparing a free public Windows release of
+ArtLapse, a local timelapse editor for existing sculpting recordings.
+Optional donations do not gate access to the application.
+
+My public developer profile is https://github.com/dmitriyermolenko81
+and my creator page is https://boosty.to/manson93 .
+The ArtLapse repository is currently private and the application does not
+have a public download page yet. I am developing it independently, rather
+than on behalf of an organization.
+
+The portable application currently includes the unmodified
+8.1.2-full_build-www.gyan.dev ffmpeg.exe and ffprobe.exe as separate processes:
+
+ffmpeg.exe SHA-256:
+ad8f211bc894755e0061c55ab280ae00e8d3d4f15a8cc4372b24cfa247b5942e
+
+ffprobe.exe SHA-256:
+9df3b0b5275e830961df6d94e1f7a71121a7abd5ff708e9fec8a0b6084a55015
+
+The included README identifies FFmpeg revision 38b88335f9. I have retained
+the README, build configuration and GPLv3 license. Before public distribution,
+I would like to obtain the complete corresponding source for these exact
+binaries, including their statically linked dependencies and applicable
+copyright/license notices, any patches, build scripts and build instructions.
+
+Could you provide a source bundle or exact source/build manifest for this
+release, including revisions for entries described as "latest" and linked
+dependencies not fully identified in the README? A link to the top-level
+FFmpeg commit alone would not identify all the linked dependency sources.
+
+I would like to make the required source material available alongside the
+application download. Please let me know where the exact material can be
+obtained and whether there are any additional source-delivery details for
+this build.
+
+Thank you for your work on the Windows builds.
+
+ArtLapse developer
+GitHub: dmitriyermolenko81

@@ -22,7 +22,7 @@ def test_logging_is_structured_and_idempotent() -> None:
     record = json.loads(lines[0])
     assert record["message"] == "Сессия готова"
     assert record["level"] == "INFO"
-    assert record["logger"] == "sculptcut"
+    assert record["logger"] == "artlapse"
     assert record["event"] == "test"
     assert datetime.fromisoformat(record["timestamp"]).utcoffset() is not None
     assert logging.getLogger().handlers == root_handlers
