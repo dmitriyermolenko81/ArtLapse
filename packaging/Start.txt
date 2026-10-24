@@ -1,4 +1,4 @@
-ArtLapse — первый запуск
+﻿ArtLapse — первый запуск
 
 1. Сохраните всю папку программы в удобном месте, доступном для записи.
    Если программа получена в архиве, сначала распакуйте его целиком.
@@ -28,14 +28,77 @@ Python, FFmpeg и необходимые библиотеки уже включ�
 
 Для Shorts также доступен квадрат 1:1 с полями в вертикальном видео.
 
-Переносите папку программы целиком: одного EXE для работы недостаточно.
-Папки _internal и bin содержат компоненты программы, data — ваши настройки
-и журналы. Не удаляйте эти папки.
+РАБОТА С ПРОЕКТОМ
 
-Дополнительные сведения: _internal/docs.
-Условия использования: _internal/LICENSE.
-Лицензии компонентов: _internal/licenses.
-При ошибке сохраните сообщение и журнал из data/logs.
+Сначала создайте проект кнопкой «+» в верхней панели. Добавьте записи слева
+через «Добавить видео». Поддерживаются MP4, MKV и MOV. Открыть существующий
+проект можно кнопкой папки вверху; рядом находится список недавних проектов.
+«Сохранить» сохраняет проект и его настройки; «Создать ролик» запускает экспорт.
+Исходные записи должны оставаться доступны по своим путям.
+
+Справа выберите режим и длительность результата. Часы, минуты и секунды
+меняются колесом; щелчок по числу включает ручной ввод. Введите имя файла
+внизу и нажмите «Создать ролик». Анализ и экспорт могут занять время,
+особенно для многочасовых записей. Долгую задачу можно отменить.
+Готовые файлы находятся в папке renders вашего проекта. «Открыть готовые
+видео» открывает папку результатов, список «Версия» переключает варианты.
+
+КАДР, МУЗЫКА, ЗАСТАВКА
+
+Выберите весь кадр или задайте рамку вокруг нужной области. Для Shorts
+доступны вертикальная и квадратная компоновки. Проверьте рамку в предпросмотре.
+Укажите свою музыку в разделе «Звук»; кнопка с нотой открывает выбор музыки.
+Музыкальные режимы используют найденные акценты для смены эпизодов или кадров.
+Картинка-заставка и презентационный клип входят в длительность результата.
+Если выбрана презентация, картинка-заставка не участвует.
+Очень короткий Photoshop-ролик может оказаться длиннее заданного времени,
+чтобы сохранить читаемую завершающую часть.
+
+ЭПИЗОДЫ И ПОДРЕЗКА
+
+«Эпизоды монтажа» открывает найденные отрывки с предпросмотром и шкалой.
+Первый эпизод выбирается автоматически; при повторном открытии сохраняется
+прежний выбор. Фильтры «В ролике» и «Пропуск» управляют показом эпизодов.
+Можно вручную исключать ненужные отрывки и отменять или повторять правки.
+
+«Подрезка ролика» раскрывает шкалу внутри главного окна. Выделите ненужный
+участок и нажмите «Вырезать участок». Можно сделать несколько вырезок.
+«Сохранить копию» предлагает два варианта:
+- «Просто вырезать» — результат короче, темп остальной части сохраняется.
+- «Вырезать и сохранить длительность» — основная часть пересобирается
+  до нужного времени при достаточном материале. Если вырезка задела начало
+  заставки или презентации, эта часть восстанавливается при пересборке.
+Эта возможность предусмотрена для всех восьми режимов.
+
+Вырезки и ручные изменения эпизодов работают вместе. «Создать ролик» также
+учитывает несохранённые вырезки; отдельно сохранять копию перед этим не нужно.
+Предыдущие версии сохраняются. Корзина возле списка версий удаляет выбранный
+готовый вариант после подтверждения. Оригинальные записи не удаляются.
+
+ШАБЛОНЫ НАСТРОЕК
+
+Кнопка «Шаблоны» в верхней панели открывает компактную строку:
+- Выберите сохранённый шаблон и нажмите галочку, чтобы применить его.
+- Плюс открывает поле имени; введите название и нажмите галочку или Enter,
+  чтобы сохранить текущие настройки как шаблон.
+- Во время ввода плюс превращается в крестик. Крестик или Escape отменяет
+  создание и возвращает прежний выбор. В обычном списке Escape закрывает панель.
+- Корзина удаляет выбранный шаблон после подтверждения.
+Применение меняет настройки монтажа, сохраняя ваши исходники и ручные правки.
+Ctrl+Z отменяет применение. Шаблоны доступны и после перезапуска программы.
+
+ХРАНЕНИЕ, ПЕРЕНОС И ПОМОЩЬ
+
+Переносите всю папку ArtLapse, включая _internal и bin. Настройки и журналы
+появляются в data рядом с EXE; для их сохранения папка должна быть доступна
+для записи. Не запускайте программу прямо из ZIP. Перемещение программы
+само по себе не переносит исходники и проекты: храните их отдельно и
+сохраняйте доступ к записям, музыке и картинкам, использованным в проекте.
+
+Если возникла ошибка, сохраните её текст и журнал из data/logs. Если видео
+не открывается, убедитесь, что весь архив распакован и запись доступна.
+Анализ помогает выбрать материал, но спорные эпизоды стоит проверить вручную.
+Программа локальная; для обычного монтажа и экспорта интернет не нужен.
 
 
 ======================================================================
@@ -72,11 +135,81 @@ SHORTS section:
 
 Shorts also support a square 1:1 picture with bands inside a vertical video.
 
-Always move the entire application folder: the EXE alone is not sufficient.
-The _internal and bin folders contain application components; data contains
-your settings and logs. Do not delete these folders.
+WORKING WITH A PROJECT
 
-Additional information: _internal/docs.
-Application terms: _internal/LICENSE.
-Component licenses: _internal/licenses.
-If an error occurs, keep the error message and the log from data/logs.
+Create a project with + in the top bar and use Add video on the left to add
+MP4, MKV or MOV recordings. The folder button opens an existing project;
+the nearby list provides recent projects. Save stores the project settings;
+Create video exports the result. Keep the source recordings at accessible paths.
+
+Choose a mode and output duration on the right. Turn the mouse wheel over
+hours, minutes or seconds, or click a number to type it. Enter an output
+filename at the bottom and click Create video. Long recordings can take time
+to analyse and export; a long task can be cancelled. Results go into your
+project's renders folder. Open finished videos opens that folder; Version
+switches between saved results.
+
+FRAMING, MUSIC AND INTRO
+
+Use the whole frame or set a frame around the area you want to show.
+Shorts support vertical and square compositions. Check framing in the preview.
+Choose your music in Sound using the musical-note button. Music modes use
+detected accents to change clips or still frames. The intro image and
+presentation clip are included in the output duration. When a presentation
+clip is selected, the intro image is not used. A very short Photoshop target
+may be extended to preserve a readable finale.
+
+EPISODES AND TRIMMING
+
+Editing episodes opens the detected segments, preview and timeline.
+The first episode is selected initially; reopening restores your selection.
+In video and Skip filter which episodes are displayed. You can manually
+exclude unwanted segments and undo or redo edits.
+
+Video trimming opens a timeline within the main window. Select an unwanted
+range and click Cut section. Multiple cuts are supported. Save a copy offers:
+- Just cut: shortens the result while preserving the pace of the remainder.
+- Cut and keep duration: rebuilds the main section to fill the target duration
+  when sufficient material is available. An intro or presentation section
+  affected by a cut at the beginning is restored during the rebuild.
+This option is supported in all eight modes.
+
+Trimming and episode changes are combined. Create video also uses unsaved
+cuts, so you do not need to save a separate copy first. Previous versions
+remain available. The trash icon beside Version deletes the selected rendered
+version after confirmation. Original recordings are not deleted.
+
+SETTINGS TEMPLATES
+
+Templates in the top bar opens a compact row:
+- Select a saved template and click the check mark to apply it.
+- Click +, enter a name and click the check mark or press Enter to save
+  the current settings as a template.
+- During entry, + becomes a cross. Click the cross or press Escape to cancel
+  creation and restore the previous selection. Escape closes the normal list.
+- The trash icon deletes the selected template after confirmation.
+Applying a template keeps your sources and manual edits. Ctrl+Z undoes the
+application. Saved templates remain available after restarting ArtLapse.
+
+STORAGE, MOVING AND HELP
+
+Move the entire ArtLapse folder, including _internal and bin. Settings and
+logs are created in data beside the EXE, so this folder must be writable.
+Do not run directly from the ZIP. Moving the application does not move your
+projects or source media: keep those separately and maintain access to the
+recordings, music and images referenced by each project.
+
+If an error occurs, keep its message and the log from data/logs. If a video
+does not open, check that you extracted the whole archive and that the source
+is accessible. Review uncertain episodes manually; automatic analysis assists
+selection. Normal editing and exporting work locally without internet access.
+
+
+LICENSE AND COMPONENT SOURCES / ЛИЦЕНЗИИ И ИСХОДНИКИ
+
+Application terms / Условия: _internal/LICENSE
+Notices / Уведомления: _internal/THIRD_PARTY_NOTICES.md, _internal/licenses
+Source and replacement instructions: _internal/docs/RUNTIME_SOURCES.md
+The third-party source archive is optional and is not needed to run ArtLapse.
+Исходники библиотек не нужны для запуска готовой программы.
+https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.0

@@ -2,7 +2,7 @@
 
 The full Windows ZIP is self-contained. The separate third-party source archive
 is optional for users and provides sources for rebuilding/replacing the libraries:
-https://github.com/dmitriyermolenko81/SculptCut/releases/download/v0.1.0/ArtLapse-0.1.0-ThirdParty-Sources.zip
+https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.0/ArtLapse-0.1.0-ThirdParty-Sources.zip
 
 ## Correspondence
 

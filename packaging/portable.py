@@ -54,6 +54,7 @@ def package(source: Path, ffmpeg: Path, destination: Path, archive: Path) -> Non
         json.dumps(versions, indent=2), encoding="utf-8",
     )
     (destination / "portable.txt").write_text("ArtLapse portable v1\n", encoding="utf-8")
+    shutil.copy2(Path(__file__).parent / "Start.txt", destination / "Start.txt")
     shutil.copy2(Path(__file__).parent / "НАЧНИТЕ_ЗДЕСЬ.txt", destination)
     shutil.copy2(Path(__file__).parent / "START_HERE.txt", destination)
     project_root = Path(__file__).resolve().parent.parent

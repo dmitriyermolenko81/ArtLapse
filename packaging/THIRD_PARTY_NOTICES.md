@@ -45,6 +45,6 @@ Python3.10.6 и библиотеки OpenCV/NumPy. Индекс архивов �
 приведены в docs/RUNTIME_SOURCES.md и runtime-sources.json.
 
 Исходники зависимостей находятся под контролем распространителя:
-https://github.com/dmitriyermolenko81/SculptCut/releases/tag/v0.1.0.
+https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.0.
 Сохранены права LGPL на замену библиотек и отладку соответствующих изменений;
 лицензия приложения не отменяет прав по лицензиям сторонних компонентов.

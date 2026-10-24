@@ -2,7 +2,7 @@
 
 **English** | [Русский](README.ru.md)
 
-**[Download ArtLapse for Windows x64](https://github.com/dmitriyermolenko81/SculptCut/releases/download/v0.1.0/ArtLapse-0.1.0-Windows-x64.zip)** · [Release notes](https://github.com/dmitriyermolenko81/SculptCut/releases/tag/v0.1.0)
+**[Download ArtLapse for Windows x64](https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.0/ArtLapse-0.1.0-Windows-x64.zip)** · [Release notes](https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.0)
 
 Extract the entire ZIP and run **ArtLapse.exe**. Python, Qt, FFmpeg and all required runtime files are included; no separate installation is needed.
 
@@ -78,7 +78,7 @@ the package index.
 Run these commands in PowerShell:
 
 ```powershell
-git clone https://github.com/dmitriyermolenko81/SculptCut.git ArtLapse
+git clone https://github.com/dmitriyermolenko81/ArtLapse.git ArtLapse
 cd ArtLapse
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
