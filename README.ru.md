@@ -2,7 +2,9 @@
 
 [English](README.md) | **Русский**
 
-[Скачать предварительный выпуск исходников](https://github.com/dmitriyermolenko81/SculptCut/releases/tag/v0.1.0-preview.231). Нужны Python и FFmpeg; готовый Windows-архив ожидает завершения проверки зависимостей.
+**[Скачать ArtLapse для Windows x64](https://github.com/dmitriyermolenko81/SculptCut/releases/download/v0.1.0/ArtLapse-0.1.0-Windows-x64.zip)** · [Описание выпуска](https://github.com/dmitriyermolenko81/SculptCut/releases/tag/v0.1.0)
+
+Распакуйте ZIP целиком и запустите **ArtLapse.exe**. Python, Qt, FFmpeg и все необходимые компоненты уже внутри; отдельно устанавливать их не нужно.
 
 <img src="src/sculptcut/assets/logo.png" alt="Логотип ArtLapse" width="88">
 
@@ -192,7 +194,7 @@ GitHub Actions выполняет Ruff, mypy и быстрые тесты без
 Условия бесплатного личного и коммерческого использования: [LICENSE](LICENSE).
 Приложение не объявляется open source; сторонние лицензии сохраняются.
 Замена LGPL-библиотек: [инструкция](docs/LIBRARY_REPLACEMENT.md).
-Публичная раздача пока не подготовлена: [статус](docs/launch/RELEASE_CHECKLIST.md).
+Проверки Windows-выпуска: [статус](docs/launch/RELEASE_CHECKLIST.md).
 Лицензии зависимостей и уведомления о компонентах находятся в
 [packaging/THIRD_PARTY_NOTICES.md](packaging/THIRD_PARTY_NOTICES.md)
 и [packaging/licenses](packaging/licenses).

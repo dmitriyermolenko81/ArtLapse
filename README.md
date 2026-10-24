@@ -2,7 +2,9 @@
 
 **English** | [Русский](README.ru.md)
 
-[Download source preview](https://github.com/dmitriyermolenko81/SculptCut/releases/tag/v0.1.0-preview.231). Python and FFmpeg are required; the Windows binary archive is pending the remaining dependency checks.
+**[Download ArtLapse for Windows x64](https://github.com/dmitriyermolenko81/SculptCut/releases/download/v0.1.0/ArtLapse-0.1.0-Windows-x64.zip)** · [Release notes](https://github.com/dmitriyermolenko81/SculptCut/releases/tag/v0.1.0)
+
+Extract the entire ZIP and run **ArtLapse.exe**. Python, Qt, FFmpeg and all required runtime files are included; no separate installation is needed.
 
 <img src="src/sculptcut/assets/logo.png" alt="ArtLapse logo" width="88">
 
