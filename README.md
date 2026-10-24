@@ -2,6 +2,8 @@
 
 **English** | [Русский](README.ru.md)
 
+[Download source preview](https://github.com/dmitriyermolenko81/SculptCut/releases/tag/v0.1.0-preview.231). Python and FFmpeg are required; the Windows binary archive is pending the remaining dependency checks.
+
 <img src="src/sculptcut/assets/logo.png" alt="ArtLapse logo" width="88">
 
 A local editing tool for artists: turn recordings of your creative process into

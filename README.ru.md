@@ -2,6 +2,8 @@
 
 [English](README.md) | **Русский**
 
+[Скачать предварительный выпуск исходников](https://github.com/dmitriyermolenko81/SculptCut/releases/tag/v0.1.0-preview.231). Нужны Python и FFmpeg; готовый Windows-архив ожидает завершения проверки зависимостей.
+
 <img src="src/sculptcut/assets/logo.png" alt="Логотип ArtLapse" width="88">
 
 Локальный автоматизированный инструмент для художников: из записей творческого
