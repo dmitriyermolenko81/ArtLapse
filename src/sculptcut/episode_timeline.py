@@ -72,7 +72,7 @@ class EpisodeTimeline(QWidget):
         self.drag = ""
         self.scrubbing = False
         self.bounds = (0, 0)
-        self.setFixedHeight(66)
+        self.setFixedHeight(54)
         self.setMouseTracking(True)
         self.setToolTip(
             tr("Нажмите участок для просмотра. ПКМ — действия. "
@@ -84,7 +84,27 @@ class EpisodeTimeline(QWidget):
 
     def refresh_after_edit(self, message: str) -> None:
         if self.editor.root:
+            item = self.editor.currentItem()
+            edited: RenderDecision | None = (item.data(Qt.ItemDataRole.UserRole)
+                                            if item is not None else None)
             self.editor.load(self.editor.root)
+            if edited is not None and not edited.output_frame_count:
+                # Reload can merge adjacent omissions and change every later row.
+                # Anchor to source time, not the old player position or row index.
+                kept = [(i, d) for i, d in self.visible_decisions()
+                        if d.action != "DROP" and d.source_id == edited.source_id]
+                previous = [(i, d) for i, d in kept
+                            if d.source_end_us <= edited.source_start_us]
+                following = [(i, d) for i, d in kept
+                             if d.source_start_us >= edited.source_end_us]
+                target = previous[-1] if previous else following[0] if following else None
+                if target is not None:
+                    self.selected, decision = target
+                    item = self.editor.item(self.selected)
+                    self.editor.setCurrentItem(item)
+                    self.editor.scrollToItem(item)
+                    self.set_position(decision.source_start_us // 1000)
+                    self.editor.preview_episode(item)
 
     def refresh(self) -> None:
         if not getattr(self.editor, "show_cards", False):
@@ -214,10 +234,15 @@ class EpisodeTimeline(QWidget):
                     painter.fillRect(QRectF(self.x_at(time) - 3, 2, 6, 32), QColor("#bcd1ff"))
             painter.setPen(QColor("#bcd1ff"))
             text = f"{clock(start)} — {clock(end)} · {format_time((end - start) / 1e6, 1)}"
+            if not self.drag and d.action != "DROP" and self.editor.plan is not None:
+                output = d.output_frame_count / self.editor.plan.output_fps
+                text += f" → {format_time(output, 1)}"
+                if d.action in ("SPEED", "KEEP") and output > 0:
+                    text += f" · {(end - start) / 1e6 / output:.1f}×"
         else:
             painter.setPen(QColor("#9aa8be"))
-            text = tr("Колесо — зум · Shift+колесо / средняя кнопка — сдвиг · двойной щелчок — всё")
-        painter.drawText(QRectF(7, 37, self.width() - 14, 25), Qt.AlignmentFlag.AlignLeft, text)
+            text = ""
+        painter.drawText(QRectF(7, 36, self.width() - 14, 18), Qt.AlignmentFlag.AlignLeft, text)
         painter.setPen(QColor("#18a7f5"))
         x = round(self.x_at(self.position))
         painter.drawLine(x, 0, x, 34)

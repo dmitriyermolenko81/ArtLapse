@@ -13,6 +13,7 @@ IconName = Literal[
     "screen", "viewport", "play", "pause", "cut", "add", "close", "chevron_down", "chevron_up",
     "check", "info",
     "trash", "crop", "episodes_music", "feedback", "presentation", "speaker", "muted",
+    "templates",
 ]
 
 
@@ -35,7 +36,13 @@ def ui_icon(name: IconName, accent: str = "#a9cbff") -> QIcon:
     )
     painter.setBrush(Qt.BrushStyle.NoBrush)
 
-    if name == "presentation":
+    if name == "templates":
+        painter.drawRoundedRect(QRectF(7, 2, 14, 16), 2, 2)
+        painter.setBrush(QColor("#202832"))
+        painter.drawRoundedRect(QRectF(3, 6, 14, 16), 2, 2)
+        for line_y in (11, 15, 19):
+            painter.drawLine(QPointF(6, line_y), QPointF(13, line_y))
+    elif name == "presentation":
         painter.drawRoundedRect(QRectF(2, 3, 20, 18), 2.5, 2.5)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(color)

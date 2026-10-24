@@ -84,9 +84,10 @@ def test_legacy_cut_history_and_self_contained_snapshots(tmp_path: Path) -> None
     assert cut_history(second) == [[(10, 20)], [(30, 40)]]
 
 
-def test_refilled_plan_does_not_reapply_baked_cuts(tmp_path: Path) -> None:
+@pytest.mark.parametrize("operation", ["shorts_refill", "duration_refill"])
+def test_refilled_plan_does_not_reapply_baked_cuts(tmp_path: Path, operation: str) -> None:
     from sculptcut.variants import cut_history
 
     video = tmp_path / "refilled.mp4"
-    save_variant(video, operation="shorts_refill", cuts=[(10, 20)])
+    save_variant(video, operation=operation, cuts=[(10, 20)])
     assert cut_history(video) == []

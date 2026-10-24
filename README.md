@@ -22,6 +22,11 @@ and a one-minute music-synced Short.
 | [![Choosing a square Shorts frame on a ZBrush recording](docs/images/en/framing.png)](docs/images/en/framing.png) | [![Trimming a finished video with a selected timeline range](docs/images/en/trimming.png)](docs/images/en/trimming.png) |
 | Move and resize the frame. This screenshot shows the square framing dialog for Shorts. | Select an unwanted section on the timeline. After cutting it, you can save a separate copy of the video. |
 
+| Review episodes | Reuse your settings |
+| --- | --- |
+| [![Compact episode review with the first episode selected](docs/images/en/episodes.png)](docs/images/en/episodes.png) | [![One-row settings template selector](docs/images/en/templates.png)](docs/images/en/templates.png) |
+| Review the source preview and compact episode cards. The selected episode is remembered when you reopen the window. | Save and apply settings using the list, plus, checkmark, and trash icons. During creation, the plus becomes a cancel button. |
+
 Click an image to view the interface at full resolution.
 These are screenshots of the running application with a real project.
 
@@ -36,7 +41,7 @@ Support is optional and is not required to download or use the application.
 - Video framing, with vertical and square layouts.
 - Your own music, an intro image, and a separate project presentation clip.
 - Episode review, manual exclusions, trimming, undo, and redo.
-- Saved projects, video variants, and reusable analysis caches.
+- Saved projects, video variants, reusable analysis caches, and settings templates.
 - Local processing; final exports use the original recordings without changing them.
 
 ArtLapse edits existing recordings. No recorder or ZBrush plugin is required.
@@ -89,11 +94,21 @@ mode, duration, and music, then click **Create video**. The **RU / EN** button i
 the upper-right corner changes the interface language. Scroll to adjust duration;
 click a number with the left mouse button to type a value.
 
-When trimming, **Save copy** offers **Just cut** (the default) and **Cut and keep
-duration**. The second option adjusts the speed of the remaining episodes. It is
-available for standard and Photoshop Shorts with a saved plan and enough source
-material. For music modes and unsupported variants, it is disabled with an
-explanation; ordinary trimming remains available. The previous version is preserved.
+Trimming opens above its toolbar and reduces the preview height without resizing
+the application. **Save copy** offers **Just cut** or **Cut and keep duration**.
+Keeping duration works across all eight modes when enough source material is
+available; it restores an intro or presentation section removed by the trim and
+fills the remaining time with the edited body. The previous version is preserved.
+
+Trims and episode changes are combined. **Create video** also includes pending
+trims before you save a separate copy. The trash button beside the version list
+deletes the selected generated version, with confirmation.
+
+**Templates** in the top toolbar stores named sets of editing settings. Use **+**
+to enter a new name in the same row, **✓** to save or apply, and the trash icon to
+delete. During creation, **+** becomes **×**; click it or press Escape to return to
+the previous selection. Applying a template keeps the current sources and manual
+edits, and can be undone with Ctrl+Z.
 
 ## Command line
 

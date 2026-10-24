@@ -98,7 +98,7 @@ from sculptcut.media import Cancelled
 from sculptcut.music_library import EXTENSIONS
 from sculptcut.output_cut_editor import OutputCutEditor
 from sculptcut.output_naming import clean_output_name, next_output_path, output_suffix
-from sculptcut.planning import RenderPlan, plan_project
+from sculptcut.planning import plan_project
 from sculptcut.playback_volume import PlaybackVolume, VolumeControl
 from sculptcut.popover import exec_anchored
 from sculptcut.preflight import check_creation
@@ -115,6 +115,7 @@ from sculptcut.project import (
 from sculptcut.proxy import make_proxies, proxy_path
 from sculptcut.rendering import render
 from sculptcut.runtime_paths import data_directory
+from sculptcut.settings_templates import TemplateOptions
 from sculptcut.shorts_layout import MUSIC_SHORTS_PRESETS, SHORTS_PRESETS
 from sculptcut.source_cards import (
     META_ROLE,
@@ -546,7 +547,6 @@ class MainWindow(QMainWindow):
         self.recent_settings.sync()
         self.close_after_job = False
         self._allow_close = False
-        self._cut_editor_target_height: int | None = None
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
@@ -622,6 +622,11 @@ class MainWindow(QMainWindow):
             project_action.setProperty("actionRole", "utility")
             project_header_layout.addWidget(project_action)
         project_actions_layout.addStretch()
+        self.templates_button = self.button(tr("Шаблоны"), self.show_templates)
+        self.templates_button.setIcon(ui_icon("templates"))
+        self.templates_button.setIconSize(QSize(18, 18))
+        self.templates_button.setToolTip(tr("Сохранить или применить набор настроек"))
+        project_actions_layout.addWidget(self.templates_button)
         self.save_button = self.button(tr("Сохранить"), self.save_current_project)
         self.save_button.setToolTip(tr("Сохранить проект без анализа и экспорта (Ctrl+S)"))
         self.save_button.setShortcut("Ctrl+S")
@@ -1000,7 +1005,7 @@ class MainWindow(QMainWindow):
         playback.addStretch(1)
         self.cut_button = self.button(tr("Подрезка ролика"), self.toggle_output_editor)
         self.cut_button.setAccessibleName(tr("Подрезка готового ролика"))
-        self.cut_button.setIcon(ui_icon("chevron_down", "#8ed5ca"))
+        self.cut_button.setIcon(ui_icon("chevron_up", "#8ed5ca"))
         self.cut_button.setIconSize(QSize(18, 18))
         self.cut_button.setCheckable(True)
         self.cut_button.setProperty("actionRole", "disclosure")
@@ -1083,6 +1088,19 @@ class MainWindow(QMainWindow):
         restore_button.setProperty("actionRole", "secondary")
         restore_button.setToolTip(tr("Вернуть параметры, с которыми была создана выбранная версия"))
         versions_layout.addWidget(restore_button)
+        self.delete_variant_button = self.button("", self.delete_selected_variant)
+        self.delete_variant_button.setObjectName("deleteVariant")
+        self.delete_variant_button.setAccessibleName(tr("Удалить выбранную версию"))
+        self.delete_variant_button.setToolTip(tr("Удалить выбранную версию"))
+        self.delete_variant_button.setIcon(ui_icon("trash", "#d6a4ab"))
+        self.delete_variant_button.setIconSize(QSize(19, 19))
+        self.delete_variant_button.setFixedSize(32, 32)
+        self.delete_variant_button.setStyleSheet(
+            "QPushButton { padding:0; }"
+            "QPushButton:hover { background:#4a2b35; border-color:#bc7787; }"
+        )
+        self.delete_variant_button.setEnabled(False)
+        versions_layout.addWidget(self.delete_variant_button)
         versions_info = QPushButton()
         versions_info.setIcon(ui_icon("info", "#c1d0e0"))
         versions_info.setIconSize(QSize(22, 22))
@@ -1105,7 +1123,7 @@ class MainWindow(QMainWindow):
         self.folder.textChanged.connect(self.refresh_variants)
         self.output_editor = OutputCutEditor(self.edit_history)
         self.controls.append(self.output_editor)
-        cut_layout.addWidget(self.output_editor)
+        cut_layout.insertWidget(0, self.output_editor)
         self.cut_section.hide()
         self.output_editor.timeline.seek_requested.connect(self.seek_cut_preview)
         self.output_editor.timeline.hover_requested.connect(self.seek.show_hover)
@@ -1318,9 +1336,7 @@ class MainWindow(QMainWindow):
                                       40 if compact else 52)
                 icon_size = 24 if compact else 28
                 button.setIconSize(QSize(icon_size, icon_size))
-        self.video.setMinimumHeight(
-            64 if compact and self.output_editor.isVisible() else 120 if compact else 200
-        )
+        self.update_preview_minimum()
         duration_layout = self.duration_card.layout()
         if duration_layout is not None:
             duration_layout.setContentsMargins(8, 1 if compact else 6, 8, 1 if compact else 6)
@@ -1329,6 +1345,13 @@ class MainWindow(QMainWindow):
             field.neighbor_height = 14 if compact else 16
             field.setMinimumHeight(56 if compact else 72)
             field.setStyleSheet("font:600 24px 'Segoe UI';" if compact else "")
+
+    def update_preview_minimum(self) -> None:
+        """Let trimming borrow preview height without raising the viewer's minimum."""
+        height = 120 if self.settings_scroll.viewport().height() < 600 else 200
+        if self.output_editor.isVisible():
+            height = max(40, height - self.output_editor.minimumSizeHint().height())
+        self.video.setMinimumHeight(height)
 
     def form_draft(self) -> dict[str, object]:
         return {
@@ -1351,6 +1374,80 @@ class MainWindow(QMainWindow):
             "shorts_layout": self.shorts_layout.currentData(),
             "square_rois": {str(p): roi.model_dump() for p, roi in self.square_rois.items()},
         }
+
+    def template_options(self) -> "TemplateOptions":
+        return TemplateOptions.model_validate({
+            "preset": self.preset.currentData(),
+            "target_seconds": (self.target.value() if self.duration_in_seconds
+                               else self.target.value() * 60),
+            "normal_minutes": (self.normal_minutes if self.duration_in_seconds
+                               else self.target.value()),
+            "shorts_seconds": (self.target.value() if self.duration_in_seconds
+                               else self.shorts_seconds),
+            "frame_mode": self.frame_mode.currentData(),
+            "crop_roi": self.crop_roi.model_dump(), "crop_customized": self.crop_customized,
+            "shorts_layout": self.shorts_layout.currentData(),
+            "webcam_enabled": self.webcam_enabled.isChecked(),
+            "music": self.music.text(), "music_selection": self.music_selection.currentData(),
+            "intro": self.intro_image.text(), "presentation_seconds": self.presentation_seconds,
+            "presentation_position": self.presentation_position,
+        })
+
+    def apply_template_options(self, options: "TemplateOptions") -> None:
+        self.preset.blockSignals(True)
+        self.preset.setCurrentIndex(self.preset.findData(options.preset))
+        self.preset.blockSignals(False)
+        self.preset_changed()
+        self.target.setValue(options.target_seconds if self.duration_in_seconds
+                             else options.target_seconds / 60)
+        self.normal_minutes, self.shorts_seconds = options.normal_minutes, options.shorts_seconds
+        self.crop_roi = options.crop_roi.model_copy()
+        self.crop_customized = options.crop_customized
+        self.frame_mode.setCurrentIndex(self.frame_mode.findData(options.frame_mode))
+        self.shorts_layout.setCurrentIndex(self.shorts_layout.findData(options.shorts_layout))
+        self.webcam_enabled.blockSignals(True)
+        self.webcam_enabled.setChecked(options.webcam_enabled)
+        self.webcam_enabled.blockSignals(False)
+        self.music.setText(options.music)
+        self.music_selection.setCurrentIndex(self.music_selection.findData(options.music_selection))
+        self.intro_image.setText(options.intro)
+        self.presentation_seconds = options.presentation_seconds
+        self.presentation_position = options.presentation_position
+        self.update_presentation_button()
+        self.update_aspect_captions()
+        self.duration_card.sync()
+        self.refresh_cut_preview()
+        self.history_controller.pending_timing = self.history_controller.timing()
+        self.history_controller.pending_framing = self.history_controller.framing()
+        self.autosave_draft()
+
+    def show_templates(self) -> None:
+        if self.job is not None:
+            return
+        from sculptcut.template_dialog import TemplateDialog
+
+        dialog = TemplateDialog(self.recent_settings, self.template_options, self)
+        result = exec_anchored(dialog, self.templates_button)
+        chosen = dialog.chosen
+        dialog.deleteLater()
+        if result != QDialog.DialogCode.Accepted or chosen is None:
+            return
+        before = (self.template_options(), self.last_timelapse_preset, self.last_shorts_preset)
+
+        def apply(state: tuple[TemplateOptions, str, str]) -> None:
+            self.apply_template_options(state[0])
+            self.last_timelapse_preset, self.last_shorts_preset = state[1:]
+
+        self.apply_template_options(chosen.options)
+        after = (self.template_options(), self.last_timelapse_preset, self.last_shorts_preset)
+        self.edit_history.record(tr("Шаблон настроек"), before, after, apply)
+        self.status.setText(tr(f"Шаблон «{chosen.name}» применён."))
+        self.status.setToolTip("")
+        missing = [path for path in (chosen.options.music, chosen.options.intro)
+                   if path and not Path(path).exists()]
+        if missing:
+            self.status.setText(self.status.text() + tr(" Некоторые файлы недоступны."))
+            self.status.setToolTip("\n".join(missing))
 
     def autosave_draft(self) -> None:
         # A draft also accepts incomplete forms; it never changes project.json.
@@ -2579,10 +2676,10 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError) as exc:
             self.show_error(str(exc))
             return
-        from sculptcut.variants import cut_history
+        from sculptcut.variants import has_manual_edits
 
         try:
-            trimmed = bool(cut_history(video))
+            trimmed = has_manual_edits(video)
         except (OSError, ValueError) as exc:
             self.show_error(str(exc))
             return
@@ -2704,12 +2801,86 @@ class MainWindow(QMainWindow):
                 self.variants.setCurrentIndex(0)
         self.variants.blockSignals(False)
         self.update_variant_tooltip()
-        self.versions_panel.setVisible(
-            self.variants.count() > 0 and not self.output_editor.isVisible()
-        )
+        self.versions_panel.setVisible(self.variants.count() > 0)
 
     def update_variant_tooltip(self) -> None:
         self.variants.setToolTip(str(self.variants.currentData() or tr("Выберите готовый ролик")))
+        self.delete_variant_button.setEnabled(
+            self.job is None and bool(self.variants.currentData())
+        )
+
+    def delete_selected_variant(self) -> None:
+        if self.job is not None or not self.variants.currentData():
+            return
+        from sculptcut.variant_deletion import delete_variant, variant_files
+
+        root = Path(self.folder.text().strip()).resolve()
+        video = Path(self.variants.currentData()).absolute()
+        inputs = self.source_paths() + [
+            Path(field.text().strip()) for field in (self.music, self.intro_image)
+            if field.text().strip()
+        ]
+        if self.presentation_video is not None:
+            inputs.append(self.presentation_video)
+        try:
+            files = variant_files(root, video, inputs)
+        except (OSError, ValueError) as exc:
+            self.show_error(str(exc))
+            return
+        dialog = QMessageBox(QMessageBox.Icon.Warning, tr("Удалить выбранную версию?"),
+                             video.name, QMessageBox.StandardButton.Cancel, self)
+        dialog.setObjectName("deleteVariantConfirmation")
+        dialog.setInformativeText(tr(
+            "MP4 и история этой версии будут удалены с диска. "
+            "Исходники и другие версии останутся."
+        ))
+        remove = dialog.addButton(tr("Удалить"), QMessageBox.ButtonRole.DestructiveRole)
+        dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        style_message_box(dialog)
+        dialog.exec()
+        confirmed = dialog.clickedButton() == remove
+        dialog.deleteLater()
+        if not confirmed:
+            return
+        current = self.player.source().toLocalFile()
+        was_current = bool(current and Path(current).resolve() == video)
+        if was_current:
+            self.clear_final_view()  # Release the MP4 handle before unlinking on Windows.
+            self.edit_history.clear()
+
+        def operation(cancel: Event, progress: Callable[[float], None],
+                      stage: Callable[[str], None]) -> str:
+            stage(tr("Удаление выбранной версии…"))
+            result = delete_variant(root, video, files, cancel, progress, inputs)
+            return json.dumps({"errors": result.errors, "cancelled": result.cancelled})
+
+        def refresh() -> None:
+            self.refresh_variants()
+            if was_current and self.variants.count():
+                self.open_variant(self.variants.currentIndex())
+            self.update_result_actions()
+
+        def deleted(value: str) -> None:
+            result = json.loads(value)
+            self.job_succeeded = not result["errors"] and not result["cancelled"]
+            refresh()
+            if result["errors"]:
+                self.show_error("\n".join(result["errors"]))
+            else:
+                self.status.setText(tr("Удаление отменено.") if result["cancelled"]
+                                    else tr("Выбранная версия удалена."))
+
+        def failed(message: str) -> None:
+            refresh()
+            self.show_error(message)
+
+        self.job = Job(operation)
+        self.job.result.connect(deleted)
+        self.job.failure.connect(failed)
+        self.job.progress.connect(self.show_progress)
+        self.job.stage.connect(self.show_stage)
+        self.job.finished.connect(self.job_finished)
+        self.begin_job(tr("Удаление выбранной версии…"), detailed_feedback=False)
 
     def open_variant(self, index: int) -> None:
         path = Path(self.variants.itemData(index))
@@ -2781,10 +2952,7 @@ class MainWindow(QMainWindow):
 
     def toggle_output_editor(self) -> None:
         if self.output_editor.isVisible():
-            self.output_editor.hide()
-            self.set_output_editor_button(False)
-            self.update_seek_range(self.player.duration())
-            self.update_position(self.player.position())
+            self.hide_output_editor()
             return
         root = Path(self.folder.text().strip())
         videos = list((root / "renders").glob("*.mp4"))
@@ -2816,32 +2984,26 @@ class MainWindow(QMainWindow):
                         self.output_editor.apply_change()
         except (OSError, ValueError, RuntimeError) as exc:
             self.show_error(str(exc))
-        available = self.screen().availableGeometry()
-        extra = self.output_editor.sizeHint().height()
-        frame_extra = self.frameGeometry().height() - self.height()
-        if not self.isMaximized():
-            if self._cut_editor_target_height is None:
-                self._cut_editor_target_height = self.height() + extra
-            self.resize(
-                min(max(self.width(), 1280), available.width()),
-                min(
-                    max(self.height(), self._cut_editor_target_height),
-                    available.height() - frame_extra,
-                ),
-            )
-            frame = self.frameGeometry()
-            self.move(
-                max(available.left(), min(frame.left(), available.right() - frame.width() + 1)),
-                max(available.top(), min(frame.top(), available.bottom() - frame.height() + 1)),
-            )
+        self.output_editor.show()
+        self.set_output_editor_button(True)
         self.refresh_cut_preview()
+
+    def hide_output_editor(self) -> None:
+        """Collapse trimming without losing pending cuts or resizing the main window."""
+        self.output_editor.hide()
+        self.set_output_editor_button(False)
+        self.update_seek_range(self.player.duration())
+        self.update_position(self.player.position())
 
     def show_episodes(self) -> None:
         if self.job is not None:
             return
         root = Path(self.folder.text().strip()).resolve()
+        video = self.current_edit_video(root)
+        cuts = list(self.output_editor.cuts) if video is not None else []
         try:
-            panel = EpisodePanel(root, self, volume_state=self.volume_state)
+            panel = EpisodePanel(root, self, volume_state=self.volume_state, video=video, cuts=cuts,
+                                 view_settings=self.recent_settings)
         except (OSError, ValueError) as exc:
             self.show_error(str(exc))
             return
@@ -2858,13 +3020,29 @@ class MainWindow(QMainWindow):
         self.episode_panel = None
         panel.deleteLater()
         if result == QDialog.DialogCode.Accepted:
-            self.render_episodes(root)
+            self.render_episodes(root, video, cuts)
 
-    def render_episodes(self, root: Path) -> None:
+    def current_edit_video(self, root: Path) -> Path | None:
+        path = Path(self.player.source().toLocalFile())
+        if path.is_file() and path.parent.resolve() in (
+            (root / "renders").resolve(), (root / "previews").resolve(),
+        ):
+            return path.resolve()
+        return None
+
+    def render_episodes(
+        self, root: Path, video: Path | None = None, cuts: list[tuple[int, int]] | None = None,
+    ) -> None:
         if self.job is not None:
             return
         try:
-            project, plan = episode_export(root)
+            from sculptcut.combined_edits import prepare_combined_edit, render_combined_edit
+
+            video = video or self.current_edit_video(root)
+            if cuts is None:
+                cuts = list(self.output_editor.cuts) if video is not None else []
+            edit = prepare_combined_edit(root, video, cuts) if video is not None else None
+            project, plan = (edit.project, edit.plan) if edit is not None else episode_export(root)
             destination = next_output_path(
                 root / "renders",
                 (project.settings.output_name or tr("монтаж")) + tr("-исправленный"),
@@ -2877,6 +3055,11 @@ class MainWindow(QMainWindow):
         def operation(cancel: Event, progress: Callable[[float], None],
                       stage: Callable[[str], None]) -> str:
             stage("Rendering MP4 from originals")
+            if edit is not None:
+                return str(render_combined_edit(
+                    root, edit, destination, cancel, progress,
+                    encoder_status=self.encoder_ready.emit,
+                ))
             return str(render(root, project, plan, destination, cancel, progress=progress,
                               encoder_status=self.encoder_ready.emit))
 
@@ -2893,6 +3076,7 @@ class MainWindow(QMainWindow):
             return
         video = Path(self.player.source().toLocalFile())
         cuts = list(self.output_editor.cuts)
+        root = Path(self.folder.text().strip()).resolve()
         try:
             snapshot = read_variant(video)
             snapshot_project = (
@@ -2903,19 +3087,13 @@ class MainWindow(QMainWindow):
             return
         if snapshot_project is None or not snapshot.get("plan"):
             unavailable = tr("У этой версии нет монтажного плана. Доступна обычная подрезка.")
-        elif snapshot.get("operation") == "cut":
-            unavailable = tr("Для сохранения длительности выберите версию до обычной подрезки.")
-        elif snapshot_project.settings.preset not in ("shorts", "photoshop_shorts"):
-            unavailable = tr("В этом режиме сохранение длительности пока недоступно.")
         else:
-            from sculptcut.shorts_refill import refill_plan_after_cuts
+            from sculptcut.combined_edits import prepare_refill_edit
 
             try:
-                refill_plan_after_cuts(
-                    snapshot_project, RenderPlan.model_validate(snapshot["plan"]), cuts,
-                )
+                prepare_refill_edit(root, video, cuts)
                 unavailable = ""
-            except ValueError as exc:
+            except (OSError, ValueError) as exc:
                 unavailable = error_text(str(exc))
         dialog = CutSaveDialog(unavailable, self)
         accepted = dialog.exec() == QDialog.DialogCode.Accepted
@@ -2923,7 +3101,6 @@ class MainWindow(QMainWindow):
         dialog.deleteLater()
         if not accepted:
             return
-        root = Path(self.folder.text().strip()).resolve()
         self.player.pause()
         self.export_note = (
             tr(" Вырезки применены; длительность сохранена. Предыдущая версия сохранена.")
@@ -2935,12 +3112,27 @@ class MainWindow(QMainWindow):
             cancel: Event, progress: Callable[[float], None], stage: Callable[[str], None]
         ) -> str:
             if refill_short:
-                from sculptcut.shorts_refill import rebuild_short_after_cuts
+                from sculptcut.shorts_refill import rebuild_after_cuts
 
                 stage(tr("Применяем вырезки и сохраняем длительность"))
-                return str(rebuild_short_after_cuts(root, video, cuts, cancel, progress))
+                return str(rebuild_after_cuts(root, video, cuts, cancel, progress))
+            from sculptcut.combined_edits import (
+                pending_episode_edits,
+                prepare_combined_edit,
+                render_combined_edit,
+            )
             from sculptcut.output_cuts import cut_output
 
+            if pending_episode_edits(root, video):
+                index = 1
+                destination = video.with_name(f"{video.stem}-edit-{index:03d}.mp4")
+                while destination.exists():
+                    index += 1
+                    destination = video.with_name(f"{video.stem}-edit-{index:03d}.mp4")
+                return str(render_combined_edit(
+                    root, prepare_combined_edit(root, video, cuts), destination, cancel, progress,
+                    encoder_status=self.encoder_ready.emit,
+                ))
             return str(cut_output(video, cuts, cancel, progress))
 
         self.job = Job(operation)
@@ -2995,10 +3187,11 @@ class MainWindow(QMainWindow):
     def set_output_editor_button(self, opened: bool) -> None:
         self.cut_button.setChecked(opened)
         self.cut_button.setIcon(ui_icon(
-            "chevron_up" if opened else "chevron_down", "#8ed5ca",
+            "chevron_down" if opened else "chevron_up", "#8ed5ca",
         ))
-        self.versions_panel.setVisible(self.variants.count() > 0 and not opened)
-        self.fit_settings_layout()
+        self.versions_panel.setVisible(self.variants.count() > 0)
+        self.versions_panel.setEnabled(not opened and self.job is None)
+        self.update_preview_minimum()
         if opened:
             self.cut_button.setToolTip(tr("Скрыть инструменты подрезки ролика"))
         else:
@@ -3275,6 +3468,11 @@ class MainWindow(QMainWindow):
         self.export_note = ""
         self.statistics.clear()
 
+        # Capture the selected version before the worker changes project settings
+        # or result playback resets the output editor.
+        edit_video = self.current_edit_video(root)
+        pending_cuts = list(self.output_editor.cuts) if edit_video else []
+
         def operation(
             cancel: Event, progress: Callable[[float], None], stage: Callable[[str], None]
         ) -> str:
@@ -3288,6 +3486,17 @@ class MainWindow(QMainWindow):
                 load_project(root)
                 if (root / "project.json").exists()
                 else create_project(root, paths)
+            )
+            from sculptcut.combined_edits import (
+                creation_edit,
+                prepare_combined_edit,
+                render_combined_edit,
+            )
+            from sculptcut.variants import has_manual_edits
+
+            previous_edit = (
+                prepare_combined_edit(root, edit_video, pending_cuts, apply_current=False)
+                if edit_video and (pending_cuts or has_manual_edits(edit_video)) else None
             )
             project = replace_sources(project, paths)
             position = sum(s.duration_us for s in project.sources)
@@ -3365,7 +3574,12 @@ class MainWindow(QMainWindow):
                     root, project, cancel, lambda t: progress(min(1, t / max(1, position)))
                 )
             phase("Updating the edit plan")
-            plan = plan_project(root, project, target, cancel, progress, phase)
+            planning_project = (project.model_copy(update={"overrides": []})
+                                if previous_edit else project)
+            plan = plan_project(root, planning_project, target, cancel, progress, phase)
+            combined = creation_edit(project, plan, previous_edit) if previous_edit else None
+            if combined:
+                plan = combined.plan
             self.statistics_ready.emit(statistics_text(plan))
             if plan.settings.get("beat_still_fallback") == "motion":
                 self.export_note = (
@@ -3387,6 +3601,11 @@ class MainWindow(QMainWindow):
                 "" if preview else preset,
             )
             phase("Rendering preview" if preview else "Rendering MP4 from originals")
+            if combined:
+                return str(render_combined_edit(
+                    root, combined, destination, cancel, progress,
+                    preview=preview, encoder_status=self.encoder_ready.emit,
+                ))
             return str(
                 render(
                     root,
@@ -3555,6 +3774,8 @@ class MainWindow(QMainWindow):
             widget.setEnabled(True)
         self.update_playback_controls()
         self.update_result_actions()
+        self.update_variant_tooltip()
+        self.versions_panel.setEnabled(not self.output_editor.isVisible())
         self.cancel_button.setEnabled(False)
         self.cancel_button.hide()
         self.progress_bar.hide()
@@ -3565,6 +3786,14 @@ class MainWindow(QMainWindow):
             self.close_after_job = False
             self._allow_close = True
             self.close()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if (event.key() == Qt.Key.Key_Escape and self.output_editor.isVisible()
+                and self.job is None):
+            self.hide_output_editor()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._allow_close or not event.spontaneous():

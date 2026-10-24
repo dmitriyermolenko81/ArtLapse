@@ -195,8 +195,8 @@ def test_real_visible_card_images_source_switch_and_frame_position(
     wait_until(app, lambda: all(not panel.editor.item(i).icon().isNull() for i in range(3)))
     assert panel.editor.isRowHidden(3)
     panel.request_frame(6000)
-    wait_until(app, lambda: panel.picture.pixmap() is not None
-               and not panel.picture.pixmap().isNull())
+    # Opening already supplies a real frame; wait for this later seek to finish.
+    wait_until(app, lambda: panel.frames.worker is None and not panel.frames.pending)
     color = panel.picture.pixmap().toImage().pixelColor(10, 10)
     assert color.blue() > 200 and color.red() < 20
     assert "00:06.00" in panel.time_label.text()
@@ -278,10 +278,10 @@ def test_episode_filters_preserve_edit_and_refresh_statistics_after_edit_and_und
     def visible() -> list[int]:
         return [i for i in range(panel.editor.count()) if not panel.editor.isRowHidden(i)]
     try:
-        assert "Всего: 6 эп. · 00:16.0" in panel.summary.text()
-        assert "В ролике: 4 эп. · 00:12.0" in panel.summary.text()
-        assert "00:08.0 в готовом ролике" in panel.summary.text()
-        assert "Пропуск: 2 эп. · 00:04.0" in panel.summary.text()
+        assert "Всего: 6 эп. · 00:16.0" in panel.summary.toolTip()
+        assert "В ролике: 4 эп. · 00:12.0" in panel.summary.toolTip()
+        assert "00:08.0 в готовом ролике" in panel.summary.toolTip()
+        assert "Пропуск: 2 эп. · 00:04.0" in panel.summary.toolTip()
         panel.show_dropped.setChecked(False)
         assert visible() == [0, 2]
         assert [i for i, _ in panel.timeline.visible_decisions()] == [0, 2]
@@ -302,7 +302,7 @@ def test_episode_filters_preserve_edit_and_refresh_statistics_after_edit_and_und
         assert panel.timeline.selected_decision() is None
         panel.sources.setCurrentIndex(1)
         assert visible() == [4]
-        assert "Показано: 1 из 3" in panel.shown_label.text()
+        assert "Показано: 1 из 3" in panel.shown_label.toolTip()
         assert (root / "project.json").read_bytes() == before
         assert (root / "render_plan.json").read_bytes() == base
         assert episode_export(root)[1] == export_before
@@ -310,16 +310,16 @@ def test_episode_filters_preserve_edit_and_refresh_statistics_after_edit_and_und
         # A real edit removes the now-kept episode from the active drop filter.
         panel.editor.apply_choice(panel.editor.item(4), "keep")
         assert not visible()
-        assert "В ролике: 5 эп. · 00:14.0" in panel.summary.text()
-        assert "Пропуск: 1 эп. · 00:02.0" in panel.summary.text()
+        assert "В ролике: 5 эп. · 00:14.0" in panel.summary.toolTip()
+        assert "Пропуск: 1 эп. · 00:02.0" in panel.summary.toolTip()
         # The planner redistributes other speeds to preserve the 8-second target.
-        assert "00:08.0 в готовом ролике" in panel.summary.text()
+        assert "00:08.0 в готовом ролике" in panel.summary.toolTip()
         panel.undo_button.click()
         assert visible() == [4]
-        assert "В ролике: 4 эп. · 00:12.0" in panel.summary.text()
-        assert "Пропуск: 2 эп. · 00:04.0" in panel.summary.text()
+        assert "В ролике: 4 эп. · 00:12.0" in panel.summary.toolTip()
+        assert "Пропуск: 2 эп. · 00:04.0" in panel.summary.toolTip()
         panel.redo_button.click()
-        assert not visible() and "Пропуск: 1 эп." in panel.summary.text()
+        assert not visible() and "Пропуск: 1 эп." in panel.summary.toolTip()
         panel.show_kept.setChecked(True)
         assert len(visible()) == 3
     finally:
@@ -335,7 +335,6 @@ def test_previous_next_follow_visible_source_episodes_and_pause_playback(
     app, _, panel = visual_panel
     before = (panel.root / "project.json").read_bytes()
     panel.show_dropped.setChecked(False)
-    panel.next_button.click()
     assert panel.timeline.selected == panel.editor.currentRow() == 0
     assert not panel.previous_button.isEnabled()
     panel.play_button.click()
@@ -396,7 +395,7 @@ def test_drag_boundary_has_real_frame_commits_once_and_noop_does_not_save(
     QTest.mouseRelease(timeline, Qt.MouseButton.LeftButton, pos=point(2_000_000))
     assert not panel.cards.paused and not panel.popup.isVisible()
     assert saved == ["Границы эпизода"]
-    assert "Создать исправленную копию" in panel.message.text()
+    assert panel.message.text() == "Правка сохранена."
     project, plan = episode_export(episode_project[0])
     kept = [d for d in plan.decisions
             if d.source_id == project.sources[0].id and d.action != "DROP"]

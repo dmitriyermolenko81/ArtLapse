@@ -3,7 +3,7 @@
 import math
 from collections.abc import Callable
 
-from PySide6.QtCore import QEvent, QPoint, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QHideEvent, QMouseEvent, QPainter, QPaintEvent, QWheelEvent
 from PySide6.QtWidgets import QDoubleSpinBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
@@ -32,9 +32,9 @@ class CutTimeline(QWidget):
         self.view_start = 0.0
         self.span = 0.0
         self.pan_x: float | None = None
-        self.setFixedHeight(82)
+        self.setFixedHeight(54)
         self.setMouseTracking(True)
-        self.setToolTip(
+        self.setAccessibleDescription(
             tr("Протяните участок для вырезки. Колесо — зум, Shift+колесо / средняя кнопка — "
             "сдвиг, двойной щелчок — весь ролик.")
         )
@@ -109,20 +109,6 @@ class CutTimeline(QWidget):
             label_x = max(0.0, min(tick - width / 2, self.width() - width))
             p.setPen(QColor("#c5d2e6"))
             p.drawText(QRectF(label_x, 36, width, 18), Qt.AlignmentFlag.AlignCenter, label)
-        p.setPen(QColor("#dce5f3"))
-        p.drawText(
-            QRectF(7, 58, self.width() - 14, 20),
-            Qt.AlignmentFlag.AlignLeft,
-            tr(
-                f"Сейчас {time_label(self.editor.position / 1000, True)} / "
-                f"{time_label(self.editor.edited_duration / 1e6, True)}"
-            )
-            + (
-                tr(f"   ·   Выделено {time_label(a, True)} — {time_label(b, True)}")
-                if b > a
-                else ""
-            ),
-        )
         p.setPen(QColor("#8ed5ca"))
         x = round(self.x_at(self.editor.position / 1000))
         p.drawLine(x, 0, x, 30)
@@ -151,9 +137,6 @@ class CutTimeline(QWidget):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         x = event.position().x()
-        self.setToolTip(
-            time_label(self.time_at(x), True) + tr(" · Колесо — зум; Shift+колесо — сдвиг")
-        )
         if self.pan_x is not None:
             self.set_view(
                 self.view_start - (x - self.pan_x) * self.span / max(1, self.width() - 15),
@@ -215,10 +198,10 @@ class OutputCutEditor(QWidget):
         self.undo_handler: Callable[[], None] = self.history.undo
         self.redo_handler: Callable[[], None] = self.history.redo
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 6, 10, 10)
-        layout.setSpacing(6)
+        layout.setContentsMargins(8, 4, 8, 8)
+        layout.setSpacing(4)
         row = QHBoxLayout()
-        row.setSpacing(10)
+        row.setSpacing(4)
         self.start, self.end = QDoubleSpinBox(), QDoubleSpinBox()
         for name, field in ((tr("Начало"), self.start), (tr("Конец"), self.end)):
             field.setDecimals(2)
@@ -237,30 +220,38 @@ class OutputCutEditor(QWidget):
         self.remove_button.setToolTip(tr("Удалить выделенный участок, сохранив остальной видеоряд"))
         self.remove_button.clicked.connect(self.add_cut)
         row.addWidget(self.remove_button)
-        actions = QHBoxLayout()
-        self.summary = QLabel(tr("Укажите начало и конец по ползунку просмотра."))
+        self.summary = QLabel()
         self.summary.setObjectName("cutSummary")
         self.summary.setWordWrap(True)
-        row.addWidget(self.summary, 1)
-        layout.addLayout(row)
-        self.undo_button = QPushButton(tr("Отменить"))
+        self.summary.hide()
+        self.undo_button = QPushButton()
         self.undo_button.setProperty("actionRole", "utility")
+        self.undo_button.setAccessibleName(tr("Отменить"))
         self.undo_button.setToolTip(tr("Вернуть последний вырезанный участок"))
         self.undo_button.setIcon(ui_icon("undo", "#a4c4bb"))
         self.undo_button.clicked.connect(self.undo)
-        actions.addWidget(self.undo_button)
-        self.redo_button = QPushButton(tr("Повторить"))
+        row.addWidget(self.undo_button)
+        self.redo_button = QPushButton()
         self.redo_button.setProperty("actionRole", "utility")
+        self.redo_button.setAccessibleName(tr("Повторить"))
+        self.redo_button.setToolTip(tr("Повторить"))
         self.redo_button.setIcon(ui_icon("redo", "#a4c4bb"))
         self.redo_button.clicked.connect(self.redo)
-        actions.addWidget(self.redo_button)
-        actions.addStretch(1)
+        row.addWidget(self.redo_button)
+        for button in (self.undo_button, self.redo_button):
+            button.setFixedSize(30, 30)
+            button.setIconSize(QSize(18, 18))
+            button.setStyleSheet("QPushButton { padding:0; }")
+        row.addStretch(1)
         self.save_button = QPushButton(tr("Сохранить копию"))
         self.save_button.setObjectName("primary")
         self.save_button.setToolTip(tr("Выбрать способ подрезки и сохранить в новый файл"))
         self.save_button.clicked.connect(self.save_requested.emit)
-        actions.addWidget(self.save_button)
-        layout.addLayout(actions)
+        row.addWidget(self.save_button)
+        for button in (self.remove_button, self.save_button):
+            button.setFixedHeight(30)
+        layout.addLayout(row)
+        layout.addWidget(self.summary)
         layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetMinimumSize)
         self.start.valueChanged.connect(self.update_actions)
         self.end.valueChanged.connect(self.update_actions)
@@ -313,6 +304,7 @@ class OutputCutEditor(QWidget):
             self.record_cuts(list(self.cuts), list(proposed))
         except (ValueError, OSError) as exc:
             self.summary.setText(str(exc))
+            self.summary.show()
             return
         self.cuts = proposed
         self.apply_change()
@@ -342,11 +334,13 @@ class OutputCutEditor(QWidget):
         self.timeline.update()
         self.save_button.setEnabled(bool(self.cuts))
         self.update_actions()
-        self.summary.setText(
+        self.summary.clear()
+        self.summary.hide()
+        self.save_button.setToolTip(
             tr(f"Удалено: {time_label((self.duration - self.edited_duration) / 1e6, True)} · "
             f"Ролик: {time_label(self.edited_duration / 1e6, True)}")
             if self.cuts
-            else tr("Выделите участок на шкале.")
+            else tr("Выбрать способ подрезки и сохранить в новый файл")
         )
 
     def update_actions(self) -> None:

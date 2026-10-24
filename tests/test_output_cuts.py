@@ -99,6 +99,7 @@ def test_player_uses_edited_time_and_skips_cut(tmp_path: Path) -> None:
         assert window.cut_button.isChecked()
         assert window.cut_button.parentWidget() is window.cut_section
         assert editor.parentWidget() is window.cut_section
+        assert editor.window() is window
         assert not window.cut_section.isAncestorOf(window.play_button)
         assert not window.cut_section.isAncestorOf(window.volume_control)
         assert window.cut_button.text() == "Подрезка ролика"
@@ -160,7 +161,8 @@ def test_player_uses_edited_time_and_skips_cut(tmp_path: Path) -> None:
                 break
             QTest.qWait(30)
         assert not window.seek.picture.pixmap().isNull()
-        assert editor.summary.geometry().top() >= bar.geometry().bottom()
+        assert not editor.summary.isVisible()
+        assert editor.remove_button.geometry().top() >= bar.geometry().bottom()
         assert editor.height() >= editor.minimumSizeHint().height()
         window.seek.hide_hover()
         window.update_position(1500)  # Playback entered a removed source interval.

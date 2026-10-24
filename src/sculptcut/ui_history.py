@@ -209,14 +209,18 @@ class WindowHistory:
 
     def record_episode(self, root: Path, before: Project, after: Project, label: str) -> None:
         expected = list(after.overrides)
-        plan_identity = sha256((root / "render_plan.json").read_bytes()).digest()
+        def identity() -> bytes | None:
+            path = root / "render_plan.json"
+            return sha256(path.read_bytes()).digest() if path.is_file() else None
+
+        plan_identity = identity()
 
         def apply(overrides: list[Override]) -> None:
             nonlocal expected
             project = load_project(root)
             if (project.overrides != expected
                     or project.sources != before.sources
-                    or sha256((root / "render_plan.json").read_bytes()).digest() != plan_identity):
+                    or identity() != plan_identity):
                 raise ValueError(
                     tr("Монтаж изменился. Откройте проект заново перед отменой эпизодов.")
                 )

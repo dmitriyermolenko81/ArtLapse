@@ -21,7 +21,7 @@ def read_variant(video: Path) -> dict[str, Any]:
     data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or data.get("schema_version") != 1:
         raise ValueError("Неизвестная версия истории ролика")
-    for field in ("project", "plan", "music"):
+    for field in ("project", "plan", "music", "episode_base_plan"):
         if data.get(field) is not None and not isinstance(data[field], dict):
             raise ValueError(f"Повреждённая история ролика: {field}")
     if data.get("parent") is not None and not isinstance(data["parent"], str):
@@ -31,6 +31,13 @@ def read_variant(video: Path) -> dict[str, Any]:
         not isinstance(cut, list) or len(cut) != 2
         or not all(isinstance(value, int) for value in cut)
         or not 0 <= cut[0] < cut[1] for cut in cuts
+    ):
+        raise ValueError("Повреждённая история ролика: cuts_us")
+    bookends = data.get("bookend_cuts_us", [])
+    if not isinstance(bookends, list) or any(
+        not isinstance(cut, list) or len(cut) != 2
+        or not all(isinstance(value, int) for value in cut)
+        or not 0 <= cut[0] < cut[1] for cut in bookends
     ):
         raise ValueError("Повреждённая история ролика: cuts_us")
     if data.get("operation") == "cut" and "cuts_us" not in data:
@@ -66,12 +73,12 @@ def cut_history(video: Path) -> list[list[tuple[int, int]]]:
             ):
                 raise ValueError("Повреждённая история ролика: cut_history_us")
             return [[(a, b) for a, b in batch] for batch in raw] + list(reversed(chain))
-        if state.get("operation") == "shorts_refill":
+        if state.get("operation") in ("shorts_refill", "duration_refill", "combined_edit"):
             return list(reversed(chain))
         if state.get("cuts_us"):
             chain.append([(a, b) for a, b in state["cuts_us"]])
         parent = state.get("parent")
-        if not parent or state.get("operation") in ("render", "shorts_refill"):
+        if not parent or state.get("operation") in ("render", "shorts_refill", "duration_refill"):
             return list(reversed(chain))
         candidate = (current.parent / parent).resolve()
         if candidate.parent != current.parent:
@@ -80,6 +87,18 @@ def cut_history(video: Path) -> list[list[tuple[int, int]]]:
                 or candidate.with_suffix(".variant.json").is_file()):
             raise ValueError("Для восстановления старых вырезок нужна история предыдущей версии")
         current = candidate
+
+
+def has_manual_edits(video: Path) -> bool:
+    """Include baked source exclusions and episode edits when protecting a variant."""
+    state = read_variant(video)
+    return bool(
+        cut_history(video) or state.get("bookend_cuts_us")
+        or state.get("episode_base_plan")
+        or state.get("operation") in ("combined_edit", "shorts_refill", "duration_refill")
+        or any(d.get("provenance") in ("user:shorts_manual_cut", "user:shorts_partial_cut")
+               for d in (state.get("plan") or {}).get("decisions", []))
+    )
 
 
 def save_variant(
@@ -92,6 +111,8 @@ def save_variant(
     cuts: list[tuple[int, int]] | None = None,
     operation: str = "render",
     history: list[list[tuple[int, int]]] | None = None,
+    bookend_cuts: list[tuple[int, int]] | None = None,
+    episode_base_plan: RenderPlan | None = None,
 ) -> None:
     snapshot = metadata_path(video, ".variant.json")
     if snapshot.exists() or video.with_suffix(".variant.json").exists():
@@ -112,7 +133,7 @@ def save_variant(
         }
     if history is None:
         history = cut_history(parent) if parent else []
-        if operation == "shorts_refill":
+        if operation in ("shorts_refill", "duration_refill", "combined_edit"):
             history = []  # This plan already incorporates cuts and refills its duration.
         elif cuts:
             history.append(cuts)
@@ -128,4 +149,12 @@ def save_variant(
         "cuts_us": cuts or [],
         "cut_history_us": history,
     }
+    if bookend_cuts is not None:
+        state["bookend_cuts_us"] = bookend_cuts
+    elif operation in ("cut", "music") and inherited.get("bookend_cuts_us"):
+        state["bookend_cuts_us"] = inherited["bookend_cuts_us"]
+    if episode_base_plan is not None:
+        state["episode_base_plan"] = episode_base_plan.model_dump(mode="json")
+    elif operation in ("cut", "music", "intro") and inherited.get("episode_base_plan"):
+        state["episode_base_plan"] = inherited["episode_base_plan"]
     atomic_write(snapshot, json.dumps(state, ensure_ascii=False, indent=2))

@@ -80,7 +80,7 @@ class AnchoredPanel(QObject):
         elif isinstance(event, QKeyEvent) and event.type() == QEvent.Type.KeyPress:
             popup = QApplication.activePopupWidget()
             if event.key() == Qt.Key.Key_Escape and popup is None:
-                self.dialog.reject()
+                self.dialog.keyPressEvent(event)
                 return True
             if event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab) and popup is None:
                 self.focus_step(event.key() == Qt.Key.Key_Backtab

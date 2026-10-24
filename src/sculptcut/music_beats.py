@@ -41,6 +41,14 @@ class BeatAnalysisSettings:
 SETTINGS = BeatAnalysisSettings()
 
 
+def _smooth(values: NDArray[np.float64], width: int) -> NDArray[np.float64]:
+    """Keep one value per audio frame even when the clip is shorter than the window."""
+    if not len(values):
+        return values.copy()
+    width = min(width, len(values))
+    return np.asarray(np.convolve(values, np.ones(width) / width, mode="same"), dtype=np.float64)
+
+
 def _samples(path: Path, seconds: float, loop: bool, cancel: Event | None) -> NDArray[np.float32]:
     with tempfile.TemporaryDirectory(prefix="sculptcut-beats-") as folder:
         pcm = Path(folder) / "audio.f32"
@@ -93,7 +101,7 @@ def _features(
     )
     flux_array = np.asarray(flux)
     width = max(3, round(SETTINGS.onset_baseline_seconds * SETTINGS.sample_rate / hop))
-    baseline = np.convolve(flux_array, np.ones(width) / width, mode="same")
+    baseline = _smooth(flux_array, width)
     onset = np.maximum(flux_array - baseline, 0)
     return times, onset, np.asarray(level)
 
@@ -126,7 +134,7 @@ def _spectral_attacks(
 
 def _onset_density(onset: NDArray[np.float64]) -> NDArray[np.float64]:
     width = max(3, round(SETTINGS.onset_density_seconds * SETTINGS.sample_rate / SETTINGS.hop_size))
-    return np.asarray(np.convolve(onset, np.ones(width) / width, mode="same"), dtype=np.float64)
+    return _smooth(onset, width)
 
 
 def _music_activity(level: float, density: float) -> float:
@@ -184,11 +192,11 @@ def foreground_accents(
         0,
     )
     smooth_width = SETTINGS.foreground_smooth_frames
-    smooth = np.convolve(score, np.ones(smooth_width) / smooth_width, mode="same")
+    smooth = _smooth(score, smooth_width)
     baseline_width = max(
         3, round(SETTINGS.foreground_baseline_seconds * SETTINGS.sample_rate / hop)
     )
-    baseline = np.convolve(smooth, np.ones(baseline_width) / baseline_width, mode="same")
+    baseline = _smooth(smooth, baseline_width)
     novelty = np.maximum(smooth - SETTINGS.foreground_baseline_fraction * baseline, 0)
     times = (np.arange(len(novelty)) * hop + size / 2) / SETTINGS.sample_rate
     candidates = [
@@ -235,7 +243,7 @@ def beat_profile(
     reference = max(float(np.quantile(level, 0.8)), 0.0001)
     frame_rate = SETTINGS.sample_rate / SETTINGS.hop_size
     smooth_width = max(3, round(SETTINGS.intensity_window_seconds * frame_rate))
-    smooth_level = np.convolve(level, np.ones(smooth_width) / smooth_width, mode="same")
+    smooth_level = _smooth(level, smooth_width)
     beats: list[tuple[float, float]] = []
     for time in grid_times:
         local_level = float(np.interp(time, times, smooth_level))

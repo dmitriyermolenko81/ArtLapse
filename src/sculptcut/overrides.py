@@ -7,8 +7,8 @@ from sculptcut.domain import Project
 from sculptcut.planning import RenderDecision, RenderPlan, validate_plan
 
 
-def apply_overrides(project: Project, plan: RenderPlan) -> RenderPlan:
-    if not project.overrides or project.settings.preset == "speed":
+def apply_overrides(project: Project, plan: RenderPlan, *, manual: bool = False) -> RenderPlan:
+    if not project.overrides or (project.settings.preset == "speed" and not manual):
         return plan
     stills = plan.settings.get("story") in ("beat_stills", "photoshop_beat_stills")
     pieces: list[RenderDecision] = []
@@ -21,6 +21,9 @@ def apply_overrides(project: Project, plan: RenderPlan) -> RenderPlan:
             if o.source_id == decision.source_id
             and o.start_us < decision.source_end_us
             and o.end_us > decision.source_start_us
+            # Output trims are an independent exclusion layer. An episode's
+            # speed/keep override must never resurrect an already cut interval.
+            and decision.provenance != "user:shorts_manual_cut"
             # Still frames have no playback speed; keep their musical duration.
             and (not stills or o.action == "DROP")
         ]

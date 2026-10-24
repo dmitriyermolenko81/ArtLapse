@@ -305,8 +305,9 @@ def test_music_clock_and_manual_cut_match_the_body_after_presentation(
     removed = [d for d in rebuilt.decisions if d.provenance == "user:shorts_manual_cut"]
     assert [(d.source_start_us, d.source_end_us) for d in removed] == [(20_000_000, 30_000_000)]
     outside = (0, 1_000_000) if position == "start" else (60_000_000, 61_000_000)
-    with pytest.raises(ValueError, match="Презентацию измените"):
-        refill_plan_after_cuts(project, plan, [outside])
+    restored = refill_plan_after_cuts(project, plan, [outside])
+    assert restored.decisions == plan.decisions
+    assert restored.actual_frame_count == plan.actual_frame_count
 
 
 def test_adding_image_after_presentation_preserves_successive_cut_clocks() -> None:

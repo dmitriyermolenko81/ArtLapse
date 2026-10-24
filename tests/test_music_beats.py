@@ -117,3 +117,20 @@ def test_isolated_foreground_attack_does_not_replace_beat() -> None:
         (4.82, 1.0),
     ]
     assert _phrase_accents(accents) == accents[1:4]
+
+
+@pytest.mark.parametrize("seconds", [0.6, 1.2, 1.5])
+def test_short_audio_windows_keep_matching_feature_clocks(tmp_path: Path, seconds: float) -> None:
+    rate = 11_025
+    time = np.arange(round(seconds * rate)) / rate
+    frequency = np.where((time * 5).astype(int) % 2, 880, 330)
+    samples = 0.3 * np.sin(2 * np.pi * frequency * time)
+    track = tmp_path / "short.wav"
+    with wave.open(str(track), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(rate)
+        output.writeframes((samples * 32767).astype("<i2").tobytes())
+    for events in (beat_profile(track, seconds, False, None),
+                   foreground_accents(track, seconds, False, None)):
+        assert all(0 <= time <= seconds and 0 <= strength <= 1 for time, strength in events)

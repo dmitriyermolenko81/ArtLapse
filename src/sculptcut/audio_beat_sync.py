@@ -38,7 +38,7 @@ def analyze_music(
         raise ValueError(f"Music file does not exist: {path}")
     stat = path.stat()
     key_data = (
-        f"continuous-beats-2|{path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}|"
+        f"continuous-beats-3|{path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}|"
         f"{duration_seconds:.6f}|{loop}"
     )
     key = hashlib.sha256(key_data.encode("utf-8")).hexdigest()

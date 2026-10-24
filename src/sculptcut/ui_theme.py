@@ -108,8 +108,8 @@ QPushButton[actionRole="disclosure"] {
 }
 QPushButton[actionRole="disclosure"]:hover { background:#203e40; color:#e3f5ef; }
 QPushButton[actionRole="disclosure"]:checked {
- background:#1c3a3c; color:#e3f5ef; border-bottom:1px solid #376369;
- border-bottom-left-radius:0; border-bottom-right-radius:0;
+ background:#1c3a3c; color:#e3f5ef; border-top:1px solid #376369;
+ border-top-left-radius:0; border-top-right-radius:0;
 }
 QPushButton[actionRole="disclosure"]:focus { border:1px solid #8ed5ca; }
 QPushButton[actionRole="disclosure"]:disabled { background:#182b2d; color:#6e9290; }

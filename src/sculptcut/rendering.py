@@ -265,6 +265,7 @@ def render(
     variant_parent: Path | None = None,
     variant_operation: str = "render",
     variant_cuts: list[tuple[int, int]] | None = None,
+    variant_episode_base: RenderPlan | None = None,
 ) -> Path:
     if preview:
         from sculptcut.preview import render_preview
@@ -291,6 +292,7 @@ def render(
             variant_parent,
             variant_operation,
             variant_cuts,
+            variant_episode_base,
         )
     except Cancelled:
         raise
@@ -313,6 +315,7 @@ def render(
             variant_parent,
             variant_operation,
             variant_cuts,
+            variant_episode_base,
         )
 
 
@@ -329,6 +332,7 @@ def _render(
     variant_parent: Path | None,
     variant_operation: str,
     variant_cuts: list[tuple[int, int]] | None,
+    variant_episode_base: RenderPlan | None,
 ) -> Path:
     validate_sources(root, project)
     validate_plan(project, plan)
@@ -581,6 +585,7 @@ def _render(
             parent=variant_parent,
             cuts=variant_cuts,
             operation=variant_operation,
+            episode_base_plan=variant_episode_base,
         )
         if guarded_frames:
             atomic_write(

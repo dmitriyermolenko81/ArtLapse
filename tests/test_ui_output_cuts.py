@@ -35,12 +35,19 @@ from sculptcut.variants import read_variant
     ("music_shorts", "plain"),
     ("beat_shorts", "plain"),
     ("photoshop_beat_shorts", "plain"),
+    ("photoshop_music_shorts", "render"),
+    ("timelapse", "render"),
+    ("speed", "render"),
+    ("music_shorts", "render"),
+    ("beat_shorts", "render"),
+    ("photoshop_beat_shorts", "render"),
     ("shorts", "insufficient"),
     ("shorts", "cancel"),
 ])
 def test_save_short_cuts_obeys_explicit_choice(
     tmp_path: Path, preset: Literal[
-        "shorts", "photoshop_shorts", "music_shorts", "beat_shorts", "photoshop_beat_shorts",
+        "timelapse", "speed", "shorts", "photoshop_shorts", "music_shorts",
+        "beat_shorts", "photoshop_beat_shorts", "photoshop_music_shorts",
     ], history: str,
 ) -> None:
     app = QApplication.instance() or QApplication([])
@@ -95,10 +102,7 @@ def test_save_short_cuts_obeys_explicit_choice(
             try:
                 assert dialog.isVisible()
                 assert dialog.trim.isChecked() and not dialog.keep_duration
-                can_refill = (
-                    history in ("plain", "render", "relocated", "cancel")
-                    and preset in ("shorts", "photoshop_shorts")
-                )
+                can_refill = history in ("plain", "render", "relocated", "cancel", "cut")
                 assert dialog.refill.isEnabled() is can_refill
                 assert dialog.reason.isVisible() is not can_refill
                 if history == "insufficient":
@@ -140,7 +144,7 @@ def test_save_short_cuts_obeys_explicit_choice(
         expected = 3 if history == "insufficient" else 18 if refilled else 12
         verify_output(result, expected, 30)
         saved = read_variant(result)
-        assert saved["operation"] == ("shorts_refill" if refilled else "cut")
+        assert saved["operation"] == ("duration_refill" if refilled else "cut")
         assert saved["parent"] == video.name
         assert saved["cuts_us"] == [list(cut) for cut in cuts]
         if history == "relocated":

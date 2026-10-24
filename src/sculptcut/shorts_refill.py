@@ -1,4 +1,4 @@
-"""Keep a manually trimmed shorts export at its planned duration."""
+"""Restore the planned duration and bookends after manual cuts in any preset."""
 
 import math
 from collections.abc import Callable
@@ -7,12 +7,11 @@ from threading import Event
 
 from sculptcut.budget import distribute
 from sculptcut.domain import Project
-from sculptcut.intro import body_start_frame
+from sculptcut.intro import body_start_frame, output_frame_count
 from sculptcut.music_library import music_signature
 from sculptcut.planning import RenderDecision, RenderPlan, validate_plan
-from sculptcut.project import load_project, resolve_snapshot_sources
 from sculptcut.rendering import render
-from sculptcut.variants import read_variant
+from sculptcut.variants import cut_history, read_variant
 
 
 def _merged_cut_frames(
@@ -22,11 +21,6 @@ def _merged_cut_frames(
     for start_us, end_us in sorted(cuts):
         start = start_us * fps // 1_000_000
         end = (end_us * fps + 999_999) // 1_000_000
-        if start < intro_offset:
-            raise ValueError(
-                "Заставку шортса нельзя вырезать этим инструментом. "
-                "Выделите участок после заставки."
-            )
         start = max(0, min(body_frames, start - intro_offset))
         end = max(0, min(body_frames, end - intro_offset))
         if start >= end:
@@ -35,8 +29,77 @@ def _merged_cut_frames(
             result[-1] = (result[-1][0], max(result[-1][1], end))
         else:
             result.append((start, end))
-    if not result:
-        raise ValueError("Вырезка не затрагивает видеоряд шортса")
+    return result
+
+
+def cuts_on_plan_clock(
+    video: Path, project: Project, plan: RenderPlan, cuts: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """Map successive ordinary trims back to the saved plan, including bookends."""
+    from sculptcut.output_cuts import retained_ranges, selected_ranges
+
+    duration = output_frame_count(project.settings, plan.output_fps, plan.actual_frame_count)
+    duration_us = (duration * 1_000_000 + plan.output_fps - 1) // plan.output_fps
+    ranges = [(0, duration_us)]
+    bookends = [tuple(cut) for cut in read_variant(video).get("bookend_cuts_us", [])]
+    for batch in [*([bookends] if bookends else []), *cut_history(video), cuts]:
+        remaining_us = sum(b - a for a, b in ranges)
+        # The player's millisecond duration can round up past the exact last
+        # frame. Clamp only that rounded endpoint, keeping other bounds strict.
+        player_end_us = (remaining_us + 999) // 1000 * 1000
+        normalized = [(start, min(end, remaining_us) if end <= player_end_us else end)
+                      for start, end in batch]
+        kept = retained_ranges(remaining_us, normalized)
+        ranges = [interval for a, b in kept for interval in selected_ranges(ranges, a, b)]
+    removed = []
+    cursor = 0
+    for start, end in ranges:
+        if cursor < start:
+            removed.append((cursor, start))
+        cursor = end
+    if cursor < duration_us:
+        removed.append((cursor, duration_us))
+    return removed
+
+
+def refill_render_context(
+    video: Path, project: Project, plan: RenderPlan,
+) -> tuple[Project, RenderPlan]:
+    """Use the exported soundtrack even when its original library has changed."""
+    from sculptcut.output_cuts import saved_soundtrack
+
+    soundtrack = saved_soundtrack(video)
+    settings = project.settings.model_copy(update={
+        "music_path": soundtrack[0] if soundtrack else None, "music_folder": None,
+    })
+    return (
+        project.model_copy(update={"settings": settings}),
+        plan.model_copy(update={"settings": plan.settings | {
+            "music_fingerprint": music_signature(settings),
+        }}),
+    )
+
+
+def _expand_montage(decision: RenderDecision) -> list[RenderDecision]:
+    """Use the same sample/frame boundaries as the renderer, preserving source coverage."""
+    if decision.action != "MONTAGE":
+        return [decision]
+    samples = decision.sample_times_us
+    result = []
+    if samples[0] > decision.source_start_us:
+        result.append(decision.model_copy(update={
+            "action": "DROP", "source_end_us": samples[0], "output_frame_count": 0,
+            "sample_times_us": [],
+        }))
+    for index, start in enumerate(samples):
+        result.append(decision.model_copy(update={
+            "action": "HOLD", "source_start_us": start,
+            "source_end_us": samples[index + 1] if index + 1 < len(samples)
+            else decision.source_end_us,
+            "output_frame_count": decision.output_frame_count * (index + 1) // len(samples)
+            - decision.output_frame_count * index // len(samples),
+            "sample_times_us": [], "provenance": "user:refill_montage",
+        }))
     return result
 
 
@@ -49,6 +112,17 @@ def _split_decision(
     if not count:
         return [decision]
     output_end = output_start + count
+    if decision.action == "HOLD":
+        # A hold always displays the same source timestamp. Splitting its source
+        # interval proportionally would silently replace that frame with another.
+        removed = sum(max(0, min(output_end, end) - max(output_start, start))
+                      for start, end in cuts)
+        return [decision.model_copy(update={
+            "output_frame_count": count - removed,
+            **({"provenance": "user:shorts_partial_cut"} if 0 < removed < count else {}),
+            **({"action": "DROP", "provenance": "user:shorts_manual_cut",
+                "sample_times_us": []} if removed == count else {}),
+        })]
     boundaries = {0, count}
     for start, end in cuts:
         if start < output_end and end > output_start:
@@ -87,27 +161,16 @@ def _split_decision(
 
 
 def refill_plan_after_cuts(
-    project: Project, plan: RenderPlan, cuts: list[tuple[int, int]]
+    project: Project, plan: RenderPlan, cuts: list[tuple[int, int]], *, allow_empty: bool = False,
+    respect_episode_speeds: bool = False,
 ) -> RenderPlan:
-    """Remove selected output ranges and refill the original shorts frame budget."""
-    if (
-        project.settings.preset not in ("shorts", "photoshop_shorts")
-        or plan.settings.get("preset") != project.settings.preset
-    ):
-        raise ValueError("Достройка длительности применяется только к шортсам")
-    if any(
-        decision.output_frame_count and decision.action not in ("SPEED", "KEEP")
-        for decision in plan.decisions
-    ):
-        raise ValueError("Этот старый монтажный план нельзя безопасно достроить после вырезки")
+    """Retain body exclusions, restore complete bookends, and refill the body budget."""
+    validate_plan(project, plan)
+    total = output_frame_count(project.settings, plan.output_fps, plan.actual_frame_count)
+    if (not cuts and not allow_empty) or any(not 0 <= start < end or end * plan.output_fps >
+                       total * 1_000_000 + plan.output_fps - 1 for start, end in cuts):
+        raise ValueError("Неверные границы удаляемого участка")
     offset = body_start_frame(project.settings, plan.output_fps, plan.actual_frame_count)
-    if project.settings.presentation_video is not None and any(
-        start * plan.output_fps < offset * 1_000_000
-        or end * plan.output_fps > (offset + plan.actual_frame_count) * 1_000_000
-        for start, end in cuts
-    ):
-        raise ValueError("Подрезка с достройкой доступна внутри монтажа. "
-                         "Презентацию измените кнопкой «Презентация модели».")
     frame_cuts = _merged_cut_frames(
         cuts,
         plan.output_fps,
@@ -116,13 +179,21 @@ def refill_plan_after_cuts(
     )
     decisions: list[RenderDecision] = []
     position = 0
-    for decision in plan.decisions:
+    for decision in [part for original in plan.decisions for part in _expand_montage(original)]:
         decisions.extend(_split_decision(decision, position, frame_cuts))
         position += decision.output_frame_count
 
     kept = [index for index, decision in enumerate(decisions) if decision.output_frame_count]
     minimum = [decisions[index].output_frame_count for index in kept]
+    from sculptcut.beat_shorts import SETTINGS as STILL_SETTINGS
+
     maximum = [
+        minimum[position] if respect_episode_speeds and decisions[index].provenance in
+        ("user:SET_SPEED", "user:KEEP", "user:LOCK_SEGMENT", "user:FORCE_MONTAGE") else
+        (minimum[position] if decisions[index].provenance in
+         ("user:final_tail", "user:shorts_final") else
+         max(minimum[position], round(STILL_SETTINGS.maximum_hold_seconds * plan.output_fps)))
+        if decisions[index].action == "HOLD" else
         max(
             decisions[index].output_frame_count,
             math.floor(
@@ -131,9 +202,13 @@ def refill_plan_after_cuts(
                 / 1_000_000
             ),
         )
-        for index in kept
+        for position, index in enumerate(kept)
     ]
-    target = plan.target_frame_count
+    target = (plan.target_frame_count if respect_episode_speeds
+              else max(plan.target_frame_count, plan.actual_frame_count))
+    if sum(minimum) > target:
+        raise ValueError("Заданные скорости эпизодов не позволяют сохранить длительность. "
+                         "Увеличьте длительность или ускорьте эпизоды.")
     if not kept or sum(maximum) < target:
         raise ValueError(
             "После вырезки недостаточно исходного материала, чтобы сохранить "
@@ -141,11 +216,19 @@ def refill_plan_after_cuts(
         )
     counts = distribute(minimum, [float(value) for value in minimum], maximum, target)
     for index, count in zip(kept, counts, strict=True):
-        decisions[index] = decisions[index].model_copy(update={"output_frame_count": count})
+        decision = decisions[index]
+        decisions[index] = decision.model_copy(update={
+            "output_frame_count": count,
+            "action": "SPEED" if decision.action == "KEEP"
+            and count != decision.output_frame_count else decision.action,
+        })
     removed_frames = sum(end - start for start, end in frame_cuts)
     settings = dict(plan.settings)
     settings.pop("request_key", None)
     settings["manual_cut_seconds"] = removed_frames / plan.output_fps
+    settings["actual_output_frames"] = output_frame_count(
+        project.settings, plan.output_fps, target,
+    )
     if settings.get("story") == "process":
         settings["final_view_frames"] = sum(
             decision.output_frame_count
@@ -158,14 +241,14 @@ def refill_plan_after_cuts(
             "actual_frame_count": target,
             "settings": settings,
             "warnings": list(plan.warnings)
-            + ["Manual cuts retained; remaining shorts footage expanded to the target"],
+            + ["Manual cuts retained; bookends restored and remaining footage expanded to target"],
         }
     )
     validate_plan(project, result)
     return result
 
 
-def rebuild_short_after_cuts(
+def rebuild_after_cuts(
     root: Path,
     video: Path,
     cuts: list[tuple[int, int]],
@@ -174,36 +257,18 @@ def rebuild_short_after_cuts(
     *,
     encoder: str = "auto",
 ) -> Path:
-    """Render a new full-duration shorts variant without repeating analysis."""
+    """Render a new full-duration variant from originals without repeating analysis."""
     state = read_variant(video)
     if not state.get("project") or not state.get("plan"):
         raise ValueError(
-            "У выбранного шортса нет сохранённого монтажного плана. "
+            "У выбранного ролика нет сохранённого монтажного плана. "
             "Его можно подрезать, но автоматически восстановить "
             "запланированную длительность нельзя."
         )
-    if state.get("operation") == "cut":
-        raise ValueError("Выберите исходную готовую версию шортса, а не подрезанную копию")
-    snapshot_project = Project.model_validate(state["project"])
-    snapshot_plan = RenderPlan.model_validate(state["plan"])
-    if snapshot_project.settings.preset not in ("shorts", "photoshop_shorts"):
-        raise ValueError("Выбранный ролик не является шортсом")
-    snapshot_project = resolve_snapshot_sources(snapshot_project, load_project(root))
+    from sculptcut.combined_edits import prepare_refill_edit
 
-    saved_music: Path | None = None
-    music_state = state.get("music")
-    if isinstance(music_state, dict) and music_state.get("path"):
-        saved_music = (video.parent / str(music_state["path"])).resolve()
-        if not saved_music.is_file():
-            raise ValueError("Сохранённая музыка этого варианта не найдена.")
-    render_settings = snapshot_project.settings.model_copy(
-        update={"music_path": saved_music, "music_folder": None}
-    )
-    render_project = snapshot_project.model_copy(update={"settings": render_settings})
-    plan_settings = dict(snapshot_plan.settings)
-    plan_settings["music_fingerprint"] = music_signature(render_settings)
-    snapshot_plan = snapshot_plan.model_copy(update={"settings": plan_settings})
-    rebuilt = refill_plan_after_cuts(render_project, snapshot_plan, cuts)
+    edit = prepare_refill_edit(root, video, cuts)
+    snapshot_project, render_project, snapshot_plan = edit.snapshot, edit.project, edit.plan
 
     index = 1
     destination = video.with_name(f"{video.stem}-edit-{index:03d}.mp4")
@@ -213,13 +278,18 @@ def rebuild_short_after_cuts(
     return render(
         root,
         render_project,
-        rebuilt,
+        snapshot_plan,
         destination,
         cancel,
         encoder=encoder,
         progress=progress,
         variant_project=snapshot_project,
         variant_parent=video,
-        variant_operation="shorts_refill",
-        variant_cuts=cuts,
+        variant_operation="duration_refill",
+        variant_cuts=edit.cuts,
+        variant_episode_base=edit.base_plan,
     )
+
+
+# Keep the old Python entry point for callers and existing integrations.
+rebuild_short_after_cuts = rebuild_after_cuts

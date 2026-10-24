@@ -43,7 +43,7 @@ QRadioButton::indicator:disabled { background:#1e2630; border-color:#485465; }
         layout.addWidget(self.refill)
         self.refill_note = QLabel(tr(
             "Оставшиеся эпизоды будут растянуты до прежней длительности. "
-            "Темп монтажа изменится."
+            "Темп монтажа изменится. Заставка и презентация восстановятся целиком."
         ))
         self.refill_note.setObjectName("subtitle")
         self.refill_note.setWordWrap(True)

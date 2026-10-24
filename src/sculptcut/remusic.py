@@ -14,7 +14,7 @@ from sculptcut.music_library import soundtrack
 from sculptcut.output_naming import next_variant_path
 from sculptcut.project import load_project, resolve_snapshot_sources, save_project
 from sculptcut.shorts_layout import MUSIC_SHORTS_PRESETS
-from sculptcut.variants import cut_history, read_variant, save_variant
+from sculptcut.variants import has_manual_edits, read_variant, save_variant
 
 
 def replace_music(
@@ -37,7 +37,7 @@ def replace_music(
     base_settings = snapshot_project.settings if snapshot_project else project.settings
     music_path = folder if folder.is_file() else None
     music_folder = None if music_path is not None else folder
-    trimmed = bool(cut_history(video))
+    trimmed = has_manual_edits(video)
     settings = base_settings.model_copy(
         update={
             "music_folder": music_folder,

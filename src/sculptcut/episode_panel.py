@@ -1,5 +1,7 @@
 """Visual correction of an existing automatic edit, without rebuilding analysis."""
 
+import hashlib
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -8,6 +10,7 @@ from PySide6.QtCore import (
     QPersistentModelIndex,
     QPoint,
     QRect,
+    QSettings,
     QSize,
     Qt,
     QTimer,
@@ -30,15 +33,18 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListView,
+    QListWidgetItem,
     QPushButton,
     QSizePolicy,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
 
+from sculptcut.compact_label import CompactLabel
 from sculptcut.domain import Project
 from sculptcut.episode_editor import EpisodeEditor
 from sculptcut.episode_images import EpisodeImages, ImageKey, image_key
@@ -53,11 +59,18 @@ from sculptcut.playback_volume import PlaybackVolume, VolumeControl
 from sculptcut.project import load_project
 from sculptcut.time_format import format_time
 from sculptcut.ui_icons import ui_icon
-from sculptcut.ui_theme import apply_dialog_theme, dialog_header
+from sculptcut.ui_theme import apply_dialog_theme
 from sculptcut.variants import read_variant
 
 
-def episode_export(root: Path) -> tuple[Project, RenderPlan]:
+def episode_export(
+    root: Path, video: Path | None = None, cuts: list[tuple[int, int]] | None = None,
+) -> tuple[Project, RenderPlan]:
+    if video is not None:
+        from sculptcut.combined_edits import prepare_combined_edit
+
+        edit = prepare_combined_edit(root, video, cuts)
+        return edit.project, edit.plan
     project = load_project(root)
     base = RenderPlan.model_validate_json((root / "render_plan.json").read_text(encoding="utf-8"))
     # A successful music export advances the *next* music seed in project.json.
@@ -76,7 +89,7 @@ def episode_export(root: Path) -> tuple[Project, RenderPlan]:
         except (OSError, ValueError):
             continue
     validate_plan(project, base)
-    return project, apply_overrides(project, base)
+    return project, apply_overrides(project, base, manual=True)
 
 
 class EpisodeCardDelegate(QStyledItemDelegate):
@@ -88,16 +101,19 @@ class EpisodeCardDelegate(QStyledItemDelegate):
         painter.setPen(QColor("#76b4f4") if selected else QColor("#354354"))
         painter.setBrush(QColor("#213451") if selected else QColor("#202936"))
         painter.drawRoundedRect(rect, 6, 6)
-        thumb = QRect(rect.center().x() - 56, rect.top() + 5, 112, 63)
+        thumb = QRect(rect.left() + 5, rect.center().y() - 18, 64, 36)
         painter.fillRect(thumb, QColor("#0c1118"))
         icon = index.data(Qt.ItemDataRole.DecorationRole)
         if isinstance(icon, QIcon) and not icon.isNull():
             icon.paint(painter, thumb)
-        lines = str(index.data(Qt.ItemDataRole.DisplayRole) or "").split("\n", 1)
+        title, _, times = str(index.data(Qt.ItemDataRole.DisplayRole) or "").partition("\n")
+        lines = [title, *times.split("–", 1)]
         for line, text in enumerate(lines):
             painter.setPen(QColor("#e0eaf7" if line == 0 else "#9aabc0"))
-            painter.drawText(QRect(rect.left() + 4, rect.top() + 70 + line * 16,
-                                   rect.width() - 8, 16), Qt.AlignmentFlag.AlignCenter, text)
+            text = painter.fontMetrics().elidedText(text, Qt.TextElideMode.ElideMiddle,
+                                                   rect.width() - 80)
+            painter.drawText(QRect(rect.left() + 76, rect.top() + 6 + line * 14,
+                                   rect.width() - 80, 14), Qt.AlignmentFlag.AlignLeft, text)
         painter.restore()
 
 
@@ -124,31 +140,57 @@ class EpisodePanel(QDialog):
     export_requested = Signal()
 
     def __init__(self, root: Path, parent: QWidget, *,
-                 volume_state: PlaybackVolume | None = None) -> None:
+                 volume_state: PlaybackVolume | None = None, video: Path | None = None,
+                 cuts: list[tuple[int, int]] | None = None,
+                 view_settings: QSettings | None = None) -> None:
         super().__init__(parent)
         apply_dialog_theme(self)
         self.root = root
-        self.project, _ = episode_export(root)
+        self.view_settings = view_settings
+        self.selection: tuple[str, int] | None = None
+        self.selection_key = "episode_focus/" + hashlib.sha256(
+            str(root.resolve()).casefold().encode("utf-8"),
+        ).hexdigest()
+        context_plan = None
+        if video is not None:
+            from sculptcut.combined_edits import prepare_combined_edit
+
+            edit = prepare_combined_edit(root, video, cuts, apply_current=False)
+            self.project, context_plan = edit.project, edit.plan
+        else:
+            self.project, _ = episode_export(root)
         self.setWindowTitle(tr("Эпизоды монтажа"))
         self.resize(1000, 650)
-        self.setMinimumSize(760, 620)
+        self.setMinimumSize(760, 540)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 18)
-        layout.setSpacing(8)
-        help_text = dialog_header(tr("Эпизоды монтажа"), "episodes_music")
-        help_text.setToolTip(
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(5)
+        help_text = (
             tr("Пробел — просмотр, светлые ручки — границы, ПКМ — действия.\n"
             "Колесо — масштаб, Shift+колесо — сдвиг. Правки сохраняются в проекте. "
-            "Общие для всех режимов, кроме «Просто ускорение». "
             "Готовое видео обновит «Создать исправленную копию».")
         )
-        help_text.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        layout.addWidget(help_text)
         self.summary = QLabel()
-        self.summary.setWordWrap(True)
         self.summary.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        self.summary.setStyleSheet("background:#181d26; border-radius:6px; padding:6px;")
-        layout.addWidget(self.summary)
+        self.summary.setStyleSheet("color:#c5d4e8; padding:4px 0;")
+        summary_row = QHBoxLayout()
+        summary_row.addWidget(self.summary, 1)
+        self.help_button = QPushButton()
+        self.help_button.setIcon(ui_icon("info"))
+        self.help_button.setAccessibleName(tr("Справка"))
+        self.help_button.setToolTip(help_text + "\n" + tr(
+            "Серые эпизоды исключены из ролика. Стоп-кадры имеют фиксированные границы.",
+        ))
+        self.help_button.setFixedSize(24, 24)
+        self.help_button.setStyleSheet(
+            "QPushButton { padding:0; border:0; background:transparent; }",
+        )
+        self.help_button.clicked.connect(lambda: QToolTip.showText(
+            self.help_button.mapToGlobal(QPoint(0, self.help_button.height())),
+            self.help_button.toolTip(), self.help_button,
+        ))
+        summary_row.addWidget(self.help_button)
+        layout.addLayout(summary_row)
         source_row = QHBoxLayout()
         source_row.addWidget(QLabel(tr("Исходник")))
         self.sources = QComboBox()
@@ -161,7 +203,7 @@ class EpisodePanel(QDialog):
         for source in self.project.sources:
             self.sources.addItem(source.path.name, source.id)
         source_row.addWidget(self.sources, 1)
-        source_row.addWidget(QLabel(tr("Исходник · 1×")))
+        self.sources.setToolTip(tr("Исходник"))
         layout.addLayout(source_row)
         self.picture = QLabel(tr("Выберите эпизод — здесь появится кадр исходника"))
         self.picture_image = QImage()
@@ -204,6 +246,8 @@ class EpisodePanel(QDialog):
         self.restart_button = QPushButton(tr("К началу"))
         self.restart_button.setToolTip(tr("К началу выбранного эпизода"))
         self.restart_button.setEnabled(False)
+        self.restart_button.setAccessibleName(tr("К началу выбранного эпизода"))
+        self.restart_button.setFixedHeight(32)
         self.restart_button.clicked.connect(self.restart_episode)
         self.loop_button = episode_toggle(tr("По кругу"))
         self.loop_button.toggled.connect(lambda value: setattr(self.playback, "loop", value))
@@ -221,71 +265,77 @@ class EpisodePanel(QDialog):
         playback_row.addWidget(self.next_button)
         playback_row.addWidget(self.restart_button)
         playback_row.addWidget(self.loop_button)
-        playback_row.addStretch(1)
+        self.time_label = QLabel("00:00.00")
+        self.time_label.setToolTip(tr("Время указано в исходнике") + " · 1×")
+        self.time_label.setMinimumWidth(72)
+        playback_row.addWidget(self.time_label, 1, Qt.AlignmentFlag.AlignCenter)
         playback_row.addWidget(self.volume_control)
+        for button in (self.play_button, self.loop_button):
+            button.setFixedHeight(32)
+        self.loop_button.setFixedWidth(96)
         layout.addLayout(playback_row)
         play_action = QAction(self)
         play_action.setShortcut("Space")
         play_action.triggered.connect(self.toggle_playback)
         self.addAction(play_action)
-        self.time_label = QLabel(tr("Время указано в исходнике"))
-        self.time_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.editor = EpisodeEditor()
         self.editor.show_cards = True
         self.editor.validate_edits = True
         self.editor.context_settings = self.project.settings
+        self.editor.context_plan = context_plan
         self.editor.setItemDelegate(EpisodeCardDelegate(self.editor))
         self.editor.setViewMode(QListView.ViewMode.IconMode)
         self.editor.setFlow(QListView.Flow.LeftToRight)
         self.editor.setWrapping(False)
-        self.editor.setFixedHeight(134)
+        self.editor.setFixedHeight(86)
         self.editor.setUniformItemSizes(True)
         self.editor.setWordWrap(True)
         self.editor.setMovement(QListView.Movement.Static)
         self.editor.setDragEnabled(False)
         self.editor.setTextElideMode(Qt.TextElideMode.ElideNone)
-        self.editor.setIconSize(QSize(112, 63))
+        self.editor.setIconSize(QSize(64, 36))
         self.timeline = EpisodeTimeline(self.editor)
         self.music = EpisodeMusic(root, self)
         self.music.hide()
         self.music.episode_requested.connect(self.select_music_episode)
-        filters = QHBoxLayout()
-        filters.addWidget(self.time_label)
-        filters.addStretch(1)
         self.show_kept = episode_toggle(tr("В ролике"))
         self.show_dropped = episode_toggle(tr("Пропуск"))
         for checkbox in (self.show_kept, self.show_dropped):
             checkbox.setChecked(True)
             checkbox.setToolTip(tr("Фильтр отображения — монтаж и экспорт не меняются"))
             checkbox.toggled.connect(self.apply_filter)
-            filters.addWidget(checkbox)
+            checkbox.setFixedSize(100, 32)
+            source_row.addWidget(checkbox)
         self.shown_label = QLabel()
         self.shown_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        filters.addWidget(self.shown_label)
-        layout.addLayout(filters)
+        source_row.addWidget(self.shown_label)
         layout.addWidget(self.timeline)
         layout.addWidget(self.music)
         layout.addWidget(self.editor)
-        self.message = QLabel(
-            tr("Серые эпизоды исключены из ролика. Стоп-кадры имеют фиксированные границы.")
-        )
-        self.message.setWordWrap(True)
-        self.message.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        layout.addWidget(self.message)
+        self.message = CompactLabel()
         actions = QHBoxLayout()
-        self.undo_button = QPushButton(tr("Отменить"))
-        self.redo_button = QPushButton(tr("Повторить"))
+        self.undo_button = QPushButton()
+        self.redo_button = QPushButton()
+        for button, name, icon in ((self.undo_button, tr("Отменить"), ui_icon("undo")),
+                                   (self.redo_button, tr("Повторить"), ui_icon("redo"))):
+            button.setAccessibleName(name)
+            button.setToolTip(name)
+            button.setIcon(icon)
+            button.setFixedSize(32, 32)
+            button.setStyleSheet("QPushButton { padding:0; }")
         actions.addWidget(self.undo_button)
         actions.addWidget(self.redo_button)
-        actions.addStretch(1)
+        actions.addWidget(self.message, 1)
         self.export_button = QPushButton(tr("Создать исправленную копию"))
         self.export_button.setObjectName("primary")
         self.export_button.setToolTip(
             tr("Использует длительность, музыку и рамку сохранённого монтажа")
         )
         self.export_button.clicked.connect(self.export_requested.emit)
+        self.export_button.setFixedHeight(32)
         actions.addWidget(self.export_button)
         close = QPushButton(tr("Закрыть"))
+        close.setFixedHeight(32)
         close.clicked.connect(self.reject)
         actions.addWidget(close)
         layout.addLayout(actions)
@@ -312,11 +362,10 @@ class EpisodePanel(QDialog):
         self.editor.horizontalScrollBar().valueChanged.connect(lambda _: self.visible_timer.start())
         self.editor.loaded.connect(self.refresh_cards)
         self.editor.preview_requested.connect(self.preview_episode)
+        self.editor.currentItemChanged.connect(self.remember_selection)
         self.editor.currentItemChanged.connect(lambda *_: self.update_navigation())
         self.editor.failed.connect(self.message.setText)
-        self.editor.changed.connect(lambda _: self.message.setText(
-            tr("Правка сохранена. Нажмите «Создать исправленную копию».")
-        ))
+        self.editor.changed.connect(lambda _: self.message.setText(tr("Правка сохранена.")))
         self.timeline.hover_requested.connect(self.preview_boundary)
         self.timeline.hover_finished.connect(self.popup.hide)
         self.timeline.dragging.connect(self.cards.set_paused)
@@ -329,6 +378,53 @@ class EpisodePanel(QDialog):
         self.active_source = ""
         self.history_connections: list[tuple[QAction, Callable[[], None]]] = []
         self.editor.load(root)
+        self.restore_selection()
+
+    def remember_selection(self, item: QListWidgetItem | None,
+                           _previous: QListWidgetItem | None = None) -> None:
+        if item is not None and not self.editor.isRowHidden(self.editor.row(item)):
+            decision: RenderDecision = item.data(Qt.ItemDataRole.UserRole)
+            self.selection = (decision.source_id,
+                              (decision.source_start_us + decision.source_end_us) // 2)
+
+    def restore_selection(self) -> None:
+        """Restore a source-time anchor, independent of card indices after replanning."""
+        saved = None
+        if self.view_settings is not None:
+            try:
+                value = json.loads(str(self.view_settings.value(self.selection_key, "{}")))
+                if (isinstance(value, dict) and value.get("version") == 1
+                        and isinstance(value.get("source_id"), str)
+                        and type(value.get("source_us")) is int and value["source_us"] >= 0):
+                    saved = (value["source_id"], value["source_us"])
+            except (ValueError, TypeError):
+                pass  # An old or damaged UI preference must not block editing.
+        if saved is not None:
+            index = self.sources.findData(saved[0])
+            if index >= 0:
+                self.sources.setCurrentIndex(index)
+            else:
+                saved = None
+        rows = self.timeline.visible_decisions()
+        if not rows and self.editor.count():
+            saved = None
+            first: RenderDecision = self.editor.item(0).data(Qt.ItemDataRole.UserRole)
+            self.sources.setCurrentIndex(self.sources.findData(first.source_id))
+            rows = self.timeline.visible_decisions()
+        if not rows:
+            return
+        row = rows[0][0]
+        if saved is not None:
+            time = saved[1]
+            row = min(rows, key=lambda entry: (
+                0 if entry[1].source_start_us <= time < entry[1].source_end_us
+                else min(abs(time - entry[1].source_start_us),
+                         abs(time - entry[1].source_end_us)),
+            ))[0]
+        item = self.editor.item(row)
+        self.editor.setCurrentItem(item)
+        self.editor.scrollToItem(item)
+        self.editor.preview_episode(item)
 
     def bind_history(self, undo: QAction, redo: QAction) -> None:
         for button, action in ((self.undo_button, undo), (self.redo_button, redo)):
@@ -357,7 +453,7 @@ class EpisodePanel(QDialog):
         self.card_keys.clear()
         for i in range(self.editor.count()):
             item = self.editor.item(i)
-            item.setSizeHint(QSize(164, 112))
+            item.setSizeHint(QSize(160, 64))
             d: RenderDecision = item.data(Qt.ItemDataRole.UserRole)
             source = next(s for s in self.project.sources if s.id == d.source_id)
             item.setToolTip(
@@ -419,8 +515,8 @@ class EpisodePanel(QDialog):
             self.editor.setRowHidden(i, not visible)
             if not visible:
                 self.editor.item(i).setIcon(QIcon())
-        self.shown_label.setText(tr(f"Показано: {shown} из {total}"))
-        self.shown_label.setToolTip(tr("Эпизоды выбранного исходника"))
+        self.shown_label.setText(f"{shown}/{total}")
+        self.shown_label.setToolTip(tr(f"Показано: {shown} из {total}"))
         if self.timeline.selected_decision() is None:
             self.playback.pause()
             self.playback.end = 0
@@ -435,7 +531,7 @@ class EpisodePanel(QDialog):
             self.clear_picture(
                 tr("Выберите эпизод") if shown else tr("Нет эпизодов по выбранным фильтрам")
             )
-            self.time_label.setText(tr("Время указано в исходнике"))
+            self.time_label.setText("—")
         self.timeline.update()
         self.update_navigation()
         self.music.select_episode(self.timeline.selected)
@@ -454,12 +550,16 @@ class EpisodePanel(QDialog):
                                      self.editor.plan.actual_frame_count)
                   / self.editor.plan.output_fps
                   if self.editor.plan is not None else 0)
-        self.summary.setText(
+        self.summary.setToolTip(
             tr(f"Весь проект · Всего: {len(decisions)} эп. · {duration(decisions)} исходников\n"
             f"В ролике: {len(kept)} эп. · {duration(kept)} исходников "
             f"→ {format_time(output, 1)} в готовом ролике   |   "
             f"Пропуск: {len(dropped)} эп. · {duration(dropped)} исходников")
         )
+        self.summary.setText(tr(
+            f"Всего: {len(decisions)} эп.     В ролике: {len(kept)}     "
+            f"Пропуск: {len(dropped)}     Ролик: {format_time(output, 1)}"
+        ))
 
     def toggle_music(self, checked: bool) -> None:
         self.music.setVisible(checked)
@@ -625,7 +725,7 @@ class EpisodePanel(QDialog):
         # Playback moves the cursor, not the selected edit or its handles.
         self.timeline.position = milliseconds * 1000
         self.timeline.update()
-        self.time_label.setText(tr("Исходник · ") + format_time(milliseconds / 1000, 2))
+        self.time_label.setText(format_time(milliseconds / 1000, 2))
 
     def playback_state(self, playing: bool) -> None:
         self.play_button.setText(tr("Ⅱ Пауза") if playing else tr("▶ Воспроизвести"))
@@ -656,11 +756,13 @@ class EpisodePanel(QDialog):
 
     def request_frame(self, milliseconds: int) -> None:
         self.video_active = False
+        if self.picture_image.isNull():
+            self.picture.setText(tr("Загрузка кадра…"))
         source = next(s for s in self.project.sources if s.id == self.sources.currentData())
         us = max(0, min(milliseconds * 1000, source.duration_us - 1))
         try:
             self.requested = image_key(source.path, us)
-            self.time_label.setText(tr("Исходник · ") + format_time(us / 1e6, 2))
+            self.time_label.setText(format_time(us / 1e6, 2))
             self.frames.request([self.requested])
         except OSError as exc:
             self.frame_failed(str(exc))
@@ -681,13 +783,15 @@ class EpisodePanel(QDialog):
             return
         pixmap = QPixmap.fromImage(image)
         if not self.video_active:
-            self.time_label.setText(tr("Кадр исходника · ") + format_time(key[1] / 1e6, 2))
+            self.time_label.setText(format_time(key[1] / 1e6, 2))
             self.show_picture(image)
         self.popup_image.setPixmap(pixmap.scaled(240, 135, Qt.AspectRatioMode.KeepAspectRatio))
         self.popup_time.setText(tr("Кадр · ") + format_time(key[1] / 1e6, 2))
 
     def frame_failed(self, message: str) -> None:
         self.message.setText(tr(message))
+        if self.picture_image.isNull():
+            self.picture.setText(tr("Кадр недоступен"))
         self.popup_image.setText(tr("Кадр недоступен"))
 
     def resizeEvent(self, event: QResizeEvent) -> None:
@@ -697,6 +801,13 @@ class EpisodePanel(QDialog):
             self.fit_picture()
 
     def shutdown(self) -> None:
+        if self.closed:
+            return
+        if self.view_settings is not None and self.selection is not None:
+            self.view_settings.setValue(self.selection_key, json.dumps({
+                "version": 1, "source_id": self.selection[0], "source_us": self.selection[1],
+            }))
+            self.view_settings.sync()
         self.closed = True
         self.music.shutdown()
         self.playback.shutdown()

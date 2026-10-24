@@ -169,7 +169,7 @@ def test_real_short_rebuild_preserves_full_duration_and_history(
     assert original.is_file()
     assert result.name == "Dragon-edit-001.mp4"
     state = read_variant(result)
-    assert state["operation"] == "shorts_refill"
+    assert state["operation"] == "duration_refill"
     assert state["parent"] == "Dragon.mp4"
     assert state["cuts_us"] == [[200_000, 400_000]]
     saved = Project.model_validate(state["project"])

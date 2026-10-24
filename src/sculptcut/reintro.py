@@ -14,7 +14,7 @@ from sculptcut.planning import RenderPlan, plan_project
 from sculptcut.presentation import presentation_frames
 from sculptcut.project import load_project, resolve_snapshot_sources, save_project
 from sculptcut.rendering import render
-from sculptcut.variants import cut_history, read_variant, save_variant
+from sculptcut.variants import cut_history, has_manual_edits, read_variant, save_variant
 
 
 def shift_intro_history(
@@ -53,7 +53,8 @@ def replace_intro(
             "У выбранного ролика нет сохранённого плана. "
             "Быстро заменить заставку в этой старой версии нельзя."
         )
-    history = cut_history(video)
+    bookends = [tuple(cut) for cut in state.get("bookend_cuts_us", [])]
+    history = [*([bookends] if bookends else []), *cut_history(video)]
 
     snapshot_project = Project.model_validate(state["project"])
     if snapshot_project.settings.presentation_video is not None:
@@ -91,7 +92,8 @@ def replace_intro(
     )
     plan = plan.model_copy(update={"settings": plan_settings})
     replanned = False
-    if not had_intro and not history and plan.settings.get("duration_budget") == "total-207":
+    if (not had_intro and not history and not has_manual_edits(video)
+            and plan.settings.get("duration_budget") == "total-207"):
         # Adding a cover changes the body budget and the soundtrack offset.
         # Reuse cached analysis, then select/retime against that smaller budget.
         plan = plan_project(

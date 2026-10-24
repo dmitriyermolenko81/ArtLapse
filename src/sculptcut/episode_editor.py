@@ -6,9 +6,9 @@ from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QCursor
 from PySide6.QtWidgets import QListView, QListWidget, QListWidgetItem, QMenu
 
+from sculptcut.combined_edits import apply_episode_edits
 from sculptcut.domain import Override, Project, ProjectSettings
 from sculptcut.i18n import tr
-from sculptcut.overrides import apply_overrides
 from sculptcut.planning import RenderDecision, RenderPlan
 from sculptcut.project import load_project, save_project
 from sculptcut.time_format import format_time
@@ -53,6 +53,7 @@ class EpisodeEditor(QListWidget):
         self.root: Path | None = None
         self.plan: RenderPlan | None = None
         self.context_settings: ProjectSettings | None = None
+        self.context_plan: RenderPlan | None = None
         self.setFlow(QListView.Flow.LeftToRight)
         self.setWrapping(False)
         self.setFixedHeight(64)
@@ -102,15 +103,17 @@ class EpisodeEditor(QListWidget):
         self.hide()
         self.root, self.plan = root, None
         path = root / "render_plan.json"
-        if not path.is_file():
+        if self.context_plan is None and not path.is_file():
             return
         try:
-            self.plan = RenderPlan.model_validate_json(path.read_text(encoding="utf-8"))
+            self.plan = self.context_plan or RenderPlan.model_validate_json(
+                path.read_text(encoding="utf-8"),
+            )
             project = load_project(root)
             if self.context_settings is not None:
                 project = project.model_copy(update={"settings": self.context_settings})
             try:
-                self.plan = apply_overrides(project, self.plan)
+                self.plan = apply_episode_edits(project, self.plan)
             except ValueError as exc:
                 if str(exc) != "Overrides drop all footage":
                     raise
@@ -141,6 +144,9 @@ class EpisodeEditor(QListWidget):
                     and d.crop == decisions[-1].crop
                     and d.subject_camera == decisions[-1].subject_camera
                     and d.source_id == decisions[-1].source_id
+                    and (d.provenance == "user:shorts_manual_cut") == (
+                        decisions[-1].provenance == "user:shorts_manual_cut"
+                    )
                     and d.source_start_us == decisions[-1].source_end_us
                 ):
                     decisions[-1] = decisions[-1].model_copy(
@@ -174,6 +180,11 @@ class EpisodeEditor(QListWidget):
             return
         menu = QMenu(self)
         decision: RenderDecision = item.data(Qt.ItemDataRole.UserRole)
+        if decision.provenance == "user:shorts_manual_cut":
+            menu.addAction(tr("Вырезано в подрезке ролика")).setEnabled(False)
+            menu.aboutToHide.connect(menu.deleteLater)
+            menu.popup(QCursor.pos())
+            return
         if decision.action in ("HOLD", "MONTAGE") or decision.sample_times_us:
             menu.addAction(tr("Стоп-кадр: границы заданы монтажом")).setEnabled(False)
             menu.aboutToHide.connect(menu.deleteLater)
@@ -253,6 +264,6 @@ class EpisodeEditor(QListWidget):
         if self.validate_edits and self.plan is not None:
             checked = (after.model_copy(update={"settings": self.context_settings})
                        if self.context_settings is not None else after)
-            apply_overrides(checked, self.plan)
+            apply_episode_edits(checked, self.plan)
         save_project(self.root, after)
         self.edit_saved.emit(before, after, label)

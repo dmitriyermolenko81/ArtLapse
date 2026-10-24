@@ -72,6 +72,8 @@ def editing_window(tmp_path: Path) -> Iterator[tuple[QApplication, MainWindow, P
     window.player.pause()
     window.output_editor.set_duration(4000)
     window.output_editor.show()
+    window.cut_section.show()
+    window.set_output_editor_button(True)
     try:
         yield app, window, source
     finally:
