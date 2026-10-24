@@ -53,7 +53,9 @@ def test_module_entry_point(module: str) -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "artlapse 0.1.0" in result.stdout
+    from sculptcut import __version__
+
+    assert f"artlapse {__version__}" in result.stdout
 
 
 def test_music_selection_option() -> None:

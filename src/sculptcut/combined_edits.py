@@ -283,6 +283,18 @@ def render_combined_edit(
     """Render body edits from originals, then retain any deliberately trimmed bookends."""
     if destination.suffix.lower() != ".mp4" or destination.exists():
         raise ValueError("Output must be a new .mp4 path")
+    from sculptcut.episode_framing import frame_restored_episodes
+
+    plan, base_plan = frame_restored_episodes(
+        root, edit.project, edit.plan, edit.base_plan, cancel,
+        lambda value: progress(value * 0.15),
+    )
+    if plan is not edit.plan:
+        edit = replace(edit, plan=plan, base_plan=base_plan)
+        render_progress = progress
+
+        def progress(value: float) -> None:
+            render_progress(0.15 + value * 0.85)
     bookends = edit.bookend_cuts()
     if not bookends:
         return render(root, edit.project, edit.plan, destination, cancel, preview,

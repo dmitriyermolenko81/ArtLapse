@@ -1,5 +1,16 @@
 # Подготовка исходников к GitHub
 
+## ArtLapse 0.1.1 — 2026-10-24
+
+Current source and complete Windows portable release: update checks and restored
+Shorts episode framing/scale fixes. The publication checkout passed43targeted
+tests in30.92seconds, Ruff and mypy122. Real source/frozen Qt HTTP checks,
+RU/EN playback and current screenshots/GIFs were verified. The source release
+contains no personal projects, preferences or original recordings.
+The Windows bundle retains the same151dependency binaries as0.1.0 and uses
+the existing published component source kit. See [release notes](releases/0.1.1.md)
+and [Windows validation](launch/RELEASE_CHECKLIST.md).
+
 ## Готовый Windows-архив — 2026-10-24
 
 Опубликованная версия исходников дополнена полным portable Windows-комплектом0.1.0. См. [проверки состава и запуска](launch/RELEASE_CHECKLIST.md). Для запуска пользователю нужен только ArtLapse-0.1.0-Windows-x64.zip; Python/FFmpeg устанавливать не требуется. Ниже — протокол проверки исходников предыдущего шага.

@@ -4,6 +4,9 @@ The full Windows ZIP is self-contained. The separate third-party source archive
 is optional for users and provides sources for rebuilding/replacing the libraries:
 https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.0/ArtLapse-0.1.0-ThirdParty-Sources.zip
 
+ArtLapse 0.1.1 uses the same dependency binaries as 0.1.0. This existing source
+archive continues to apply; the new Windows ZIP includes the retained notices.
+
 ## Correspondence
 
 - Qt DLLs/plugins: Qt6.8.3, matching the installed PySide6 distribution by SHA256. Included sources: qtbase, qtdeclarative, qtmultimedia, qtsvg, qtimageformats, qttranslations, qtwebengine(PDF)6.8.3.
@@ -36,4 +39,4 @@ notices and SHA256 manifests.
 Replacement: [LIBRARY_REPLACEMENT.md](LIBRARY_REPLACEMENT.md). ArtLapse permits
 LGPL library replacement and reverse engineering to debug those modifications;
 there is no library signature lock. The source archive is downloadable from
-the same publisher/release page as the Windows binary at no charge.
+the publisher's 0.1.0 release at no charge, linked from the current release.

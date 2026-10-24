@@ -1,4 +1,13 @@
-# Изменения
+# Changelog
+
+## 0.1.1 — 2026-10-24
+
+- Check GitHub releases in the background at startup or from the top toolbar.
+- Offer the complete Windows ZIP through a compact Download / Later prompt.
+- Handle offline checks, timeouts and application closing without blocking editing.
+- Keep framing and scale consistent for restored music-synced Shorts episodes,
+  including previously saved affected edits, while preserving cuts and timing.
+- Update the user guide, screenshots, download links and release documentation.
 
 ## Инструкция и имя репозитория — 2026-10-24
 

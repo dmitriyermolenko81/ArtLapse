@@ -1,4 +1,4 @@
-﻿ArtLapse — первый запуск
+﻿ArtLapse 0.1.1 — первый запуск
 
 1. Сохраните всю папку программы в удобном месте, доступном для записи.
    Если программа получена в архиве, сначала распакуйте его целиком.
@@ -86,6 +86,17 @@ Python, FFmpeg и необходимые библиотеки уже включ�
 - Корзина удаляет выбранный шаблон после подтверждения.
 Применение меняет настройки монтажа, сохраняя ваши исходники и ручные правки.
 Ctrl+Z отменяет применение. Шаблоны доступны и после перезапуска программы.
+
+ОБНОВЛЕНИЯ
+
+При запуске программа в фоне проверяет новые версии на GitHub.
+Круговая стрелка справа вверху запускает проверку вручную.
+Если вышла новая версия, нажмите «Скачать» или отложите кнопкой «Позже».
+«Скачать» открывает готовый Windows ZIP в браузере. Распакуйте его целиком
+в отдельную папку. Программа не устанавливает обновление автоматически.
+Для переноса настроек после закрытия программы скопируйте папку data
+из прежней папки приложения в новую. Проекты и исходные записи оставьте на месте.
+Без интернета автоматическая проверка не мешает работе.
 
 ХРАНЕНИЕ, ПЕРЕНОС И ПОМОЩЬ
 
@@ -191,6 +202,17 @@ Templates in the top bar opens a compact row:
 Applying a template keeps your sources and manual edits. Ctrl+Z undoes the
 application. Saved templates remain available after restarting ArtLapse.
 
+UPDATES
+
+ArtLapse checks GitHub for new releases in the background at startup.
+The circular-arrow button in the top bar checks again manually.
+When an update is available, choose Download or Later. Download opens the
+complete Windows ZIP in your browser. Extract it to a separate folder.
+Updates are not installed automatically. To transfer preferences, close
+the application and copy data from the previous application folder into
+the new one. Keep projects and original media in place. Offline editing
+and exporting remain available.
+
 STORAGE, MOVING AND HELP
 
 Move the entire ArtLapse folder, including _internal and bin. Settings and
@@ -212,4 +234,5 @@ Notices / Уведомления: _internal/THIRD_PARTY_NOTICES.md, _internal/li
 Source and replacement instructions: _internal/docs/RUNTIME_SOURCES.md
 The third-party source archive is optional and is not needed to run ArtLapse.
 Исходники библиотек не нужны для запуска готовой программы.
-https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.0
+Release: https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.1
+Library sources (unchanged): https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.0/ArtLapse-0.1.0-ThirdParty-Sources.zip

@@ -573,9 +573,14 @@ def reframe_shorts(
     plan: RenderPlan,
     cancel: Event | None,
     progress: Callable[[float], None] | None = None,
+    *,
+    preserve_selection: bool = False,
 ) -> RenderPlan:
-    process = plan.settings.get("story") == "process"
-    if not process:
+    # Music synchronization renames the process story after initial framing.
+    # Restored episodes still need the same viewport camera, not a camera
+    # widened to contain every model position across their whole source span.
+    process = plan.settings.get("story") in ("process", "music_episodes")
+    if not process and not preserve_selection:
         plan = replace_black_shots(root, project, plan, cancel)
     decisions = plan.decisions[:]
     replacements: dict[int, list[RenderDecision]] = {}
@@ -597,6 +602,19 @@ def reframe_shorts(
             for index, decision in enumerate(decisions):
                 if decision.source_id != source.id or decision.action == "DROP":
                     continue
+                context_viewport: Roi | None = None
+                if preserve_selection and process:
+                    context = [d for d in decisions if d.source_id == source.id
+                               and d.subject_camera is not None and d.provenance not in (
+                                   "user:KEEP", "user:RETAIN", "user:SET_SPEED",
+                                   "user:FORCE_MONTAGE",
+                               )]
+                    closest = min(context, key=lambda d: abs(
+                        d.source_start_us - decision.source_start_us,
+                    ), default=None)
+                    if closest is not None and closest.subject_camera is not None:
+                        context_viewport = closest.subject_camera.viewport
+                        source_viewport = context_viewport
                 wide = not process and shot_index % 2 == 0
                 shot_index += 1
                 if progress:
@@ -683,7 +701,10 @@ def reframe_shorts(
                     bounds = canvas_bounds(gray)
                     if bounds:
                         backgrounds.append(bounds[-1])
-                    viewport = viewport_box(gray)
+                    # Close-up models can cover half the flat canvas, making
+                    # background detection shrink it. Restored clips share the
+                    # viewport already verified for nearby original episodes.
+                    viewport = context_viewport or viewport_box(gray)
                     if viewport is None:
                         confident = False
                     else:
@@ -840,7 +861,7 @@ def reframe_shorts(
         from sculptcut.process_story import STORY
 
         screens = sustained_screens(screens, STORY.screen_drop_us)
-    return strip_screens(project, result, screens)
+    return result if preserve_selection else strip_screens(project, result, screens)
 
 
 def sustained_screens(ranges: list[IdleRange], minimum_us: int) -> list[IdleRange]:

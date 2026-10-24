@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "artlapse"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local automated shorts and timelapse editor for artists' process recordings"
 readme = "README.md"
 license = {file = "LICENSE"}

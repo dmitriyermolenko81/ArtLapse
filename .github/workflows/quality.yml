@@ -29,4 +29,7 @@ jobs:
       - name: Type check
         run: python -m mypy src
       - name: Fast tests without media tools
-        run: python -m pytest -q tests/test_image_statistics.py tests/test_screen_cache.py
+        run: >-
+          python -m pytest -q tests/test_image_statistics.py tests/test_screen_cache.py
+          tests/test_updates.py tests/test_cli.py::test_module_entry_point
+          tests/test_language_switch.py::test_catalog_has_complete_english_and_preserves_template_fields

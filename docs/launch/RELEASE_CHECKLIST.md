@@ -1,4 +1,19 @@
-# Windows-выпуск ArtLapse 0.1.0
+# Windows release verification
+
+## 0.1.1 — 2026-10-24
+
+Complete Windows x64 portable archive with the update checker and restored
+episode framing fixes. Targeted update/framing regressions, Ruff, mypy,
+real Qt HTTP requests, frozen RU/EN playback and real GitHub HTTPS checks passed.
+No personal settings are included. Dependency binary hashes match 0.1.0;
+the existing component source archive continues to apply.
+Full-suite and eight-mode exports were not repeated for this publication;
+the relevant local checks and earlier verified exports are recorded separately.
+Unsigned executable; no second clean Windows machine was tested.
+
+See [release notes](../releases/0.1.1.md) and [updates](../updates.md).
+
+## Windows-выпуск ArtLapse 0.1.0
 
 ## Проверенный состав — 2026-10-24
 

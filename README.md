@@ -2,7 +2,7 @@
 
 **English** | [Русский](README.ru.md)
 
-**[Download ArtLapse for Windows x64](https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.0/ArtLapse-0.1.0-Windows-x64.zip)** · [Release notes](https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.0)
+**[Download ArtLapse for Windows x64](https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.1/ArtLapse-0.1.1-Windows-x64.zip)** · [Release notes](https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.1)
 
 Extract the entire ZIP and run **ArtLapse.exe**. Python, Qt, FFmpeg and all required runtime files are included; no separate installation is needed.
 
@@ -46,9 +46,27 @@ Support is optional and is not required to download or use the application.
 - Your own music, an intro image, and a separate project presentation clip.
 - Episode review, manual exclusions, trimming, undo, and redo.
 - Saved projects, video variants, reusable analysis caches, and settings templates.
+- Background update checks at startup and a manual check button in the top bar.
 - Local processing; final exports use the original recordings without changing them.
 
 ArtLapse edits existing recordings. No recorder or ZBrush plugin is required.
+
+Version **0.1.1** adds update notifications and fixes framing and scale when
+previously skipped clips are restored in music-synced Shorts. Manual cuts and
+episode timing are preserved.
+
+## Updates
+
+ArtLapse checks GitHub in the background at startup. The circular-arrow button
+beside **RU / EN** checks again. A new version opens a compact **Download / Later**
+prompt. Download opens the complete Windows ZIP in your browser; installation
+is manual. Offline editing and exporting remain available.
+
+![Manual update check in ArtLapse 0.1.1](docs/images/en/updates.png)
+
+Extract the new ZIP into a separate folder. To keep preferences, close ArtLapse
+and copy `data` from the previous application folder to the new one. Keep your
+projects and original media in place. [Update details](docs/updates.md).
 
 ## Editing modes
 
@@ -196,7 +214,9 @@ Behavior on macOS and Linux has not been separately verified.
 Terms for free personal and commercial use: [LICENSE](LICENSE).
 The application is not offered under an open-source license; third-party
 licenses are retained. Replacing LGPL libraries: [guide](docs/LIBRARY_REPLACEMENT.md).
-Public binary distribution is not ready yet: [status](docs/launch/RELEASE_CHECKLIST.md).
+Windows release validation: [status](docs/launch/RELEASE_CHECKLIST.md).
+Optional [library sources](https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.0/ArtLapse-0.1.0-ThirdParty-Sources.zip)
+are unchanged from 0.1.0 and are not needed to run the application.
 Dependency licenses and component notices are in
 [packaging/THIRD_PARTY_NOTICES.md](packaging/THIRD_PARTY_NOTICES.md)
 and [packaging/licenses](packaging/licenses).
@@ -204,4 +224,4 @@ and [packaging/licenses](packaging/licenses).
 The application was previously called SculptCut. Existing projects and settings
 remain compatible. The `sculptcut` Python API and legacy commands are retained;
 the new commands are `artlapse` / `artlapse-gui`, or `python -m artlapse` /
-`python -m artlapse.ui`. The existing GitHub and Telegram addresses remain unchanged.
+`python -m artlapse.ui`.

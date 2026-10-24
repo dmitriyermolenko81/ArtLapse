@@ -130,6 +130,7 @@ from sculptcut.ui_history import WindowHistory
 from sculptcut.ui_icons import ui_icon
 from sculptcut.ui_language import install_language, retranslate_windows
 from sculptcut.ui_theme import STYLE, style_message_box
+from sculptcut.update_dialog import UpdateController
 from sculptcut.variants import read_variant
 
 INI_FORMAT = QSettings.Format.IniFormat
@@ -639,6 +640,16 @@ class MainWindow(QMainWindow):
         self.cleanup_button.setFixedSize(36, 36)
         self.cleanup_button.setStyleSheet("QPushButton { padding:0; }")
         project_actions_layout.addWidget(self.cleanup_button)
+        self.update_button = QPushButton()
+        self.update_button.setAccessibleName(tr("Проверить обновления"))
+        self.update_button.setToolTip(tr("Проверить обновления"))
+        self.update_button.setIcon(ui_icon("update"))
+        self.update_button.setIconSize(QSize(20, 20))
+        self.update_button.setFixedSize(36, 36)
+        self.update_button.setProperty("actionRole", "utility")
+        self.update_button.setStyleSheet("QPushButton { padding:0; }")
+        project_actions_layout.addWidget(self.update_button)
+        self.updates = UpdateController(self, self.update_button)
         self.language_button = QPushButton(
             selected_language.upper() if selected_language in ("ru", "en") else "RU"
         )
@@ -3233,6 +3244,7 @@ class MainWindow(QMainWindow):
             self.request_cancellation()
 
     def finish_close(self, event: QCloseEvent) -> None:
+        self.updates.shutdown()
         self.autosave_draft()
         self.draft_timer.stop()
         self.seek.shutdown()
@@ -3813,6 +3825,7 @@ def main() -> int:
     window = MainWindow()
     window.show()
     QTimer.singleShot(0, window.recover_session)
+    window.updates.schedule_startup()
     return application.exec()
 
 
