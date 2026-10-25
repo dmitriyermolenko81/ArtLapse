@@ -1,7 +1,8 @@
 # Updates
 
-ArtLapse 0.1.1 checks the latest stable GitHub release in the background after
-startup. The circular-arrow button beside RU / EN runs a manual check.
+ArtLapse checks the latest stable GitHub release in the background after
+startup. Version 0.1.2 is displayed beside ArtLapse and in the window title.
+The circular-arrow button beside RU / EN runs a manual check.
 The compact prompt offers Download or Later. Download opens the complete
 Windows ZIP in your browser. ArtLapse does not install it automatically.
 

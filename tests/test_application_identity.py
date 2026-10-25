@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication, QDialog
 
+from sculptcut import __version__
 from sculptcut.application_identity import (
     APP_USER_MODEL_ID,
     configure_application_identity,
@@ -48,6 +49,7 @@ def test_real_windows_identity_and_native_window_icons() -> None:
     configure_application_identity()
     app = QApplication.instance() or QApplication([])
     assert app.applicationName() == "ArtLapse"
+    assert app.applicationVersion() == __version__
     assert windows_application_id() == APP_USER_MODEL_ID
     window = MainWindow()
     dialog = QDialog(window)

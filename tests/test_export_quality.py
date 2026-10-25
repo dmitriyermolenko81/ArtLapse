@@ -46,15 +46,20 @@ def test_real_1440p_export_preserves_resolution_and_detail(tmp_path: Path) -> No
     metadata = probe(result)
     assert (metadata.width, metadata.height) == (2560, 1440)
     verify_output(result, 30, 30)
-    original = cv2.VideoCapture(str(source))
-    exported = cv2.VideoCapture(str(result))
-    try:
-        ok_source, before = original.read()
-        ok_result, after = exported.read()
-        assert ok_source and ok_result
-        # Detect detail loss even if someone later upscales a 720p intermediate.
-        mse = np.mean((before.astype(np.float64) - after.astype(np.float64)) ** 2)
-        assert mse < 16, f"Excessive first-frame distortion: MSE={mse}"
-    finally:
-        original.release()
-        exported.release()
+    frames = []
+    for video, name in ((source, "before.png"), (result, "after.png")):
+        image = tmp_path / name
+        # Compare RGB pixels with each video's actual color matrix. OpenCV's
+        # VideoCapture YUV conversion can ignore BT.709 and report a false loss
+        # of detail when a BT.601 source is correctly converted for delivery.
+        run_process([
+            discover("ffmpeg"), "-v", "error", "-i", str(video),
+            "-frames:v", "1", str(image),
+        ])
+        frame = cv2.imdecode(np.fromfile(image, dtype=np.uint8), cv2.IMREAD_COLOR)
+        assert frame is not None
+        frames.append(frame)
+    before, after = frames
+    # Detect detail loss even if someone later upscales a 720p intermediate.
+    mse = np.mean((before.astype(np.float64) - after.astype(np.float64)) ** 2)
+    assert mse < 16, f"Excessive first-frame distortion: MSE={mse}"

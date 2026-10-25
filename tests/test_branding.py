@@ -8,6 +8,7 @@ from PySide6.QtCore import QSettings
 from PySide6.QtGui import QIcon, QImage
 from PySide6.QtWidgets import QApplication, QLabel
 
+from sculptcut import __version__
 from sculptcut.cli import build_parser
 from sculptcut.feedback_dialog import FeedbackDialog
 from sculptcut.project import create_empty_project, load_project
@@ -25,7 +26,9 @@ def test_visible_brand_and_selected_icon_assets() -> None:
     try:
         window.show()
         app.processEvents()
-        assert window.windowTitle() == "ArtLapse"
+        assert window.windowTitle() == f"ArtLapse {__version__}"
+        assert window.version_label.isVisible()
+        assert window.version_label.text() == f"v{__version__}"
         title = window.findChild(QLabel, "title")
         assert title is not None and title.text() == "ArtLapse"
         assert "ArtLapse" in feedback.windowTitle()

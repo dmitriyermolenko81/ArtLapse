@@ -10,6 +10,7 @@ from sculptcut.media import discover, run_process
 from sculptcut.presentation import presentation_frames, presentation_signature
 from sculptcut.project import fingerprint
 from sculptcut.shorts_layout import SQUARE_BACKGROUND, uses_square
+from sculptcut.video_color import SDR_ENCODER_ARGS, SDR_FILTER
 
 
 def active_intro_image(settings: ProjectSettings) -> Path | None:
@@ -103,7 +104,7 @@ def prepend_intro(
     with tempfile.TemporaryDirectory(prefix="intro-", dir=output.parent) as scratch:
         script = Path(scratch) / "filter.txt"
         cover = (
-            "[1:v]split[coverback][coverfront];"
+            f"[1:v]{SDR_FILTER},split[coverback][coverfront];"
             f"[coverback]scale={width}:{height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height},boxblur=10:2[background];"
             f"[coverfront]scale={width}:{height}:force_original_aspect_ratio=decrease:"
@@ -112,17 +113,17 @@ def prepend_intro(
         )
         if uses_square(settings):
             cover = (
-                f"[1:v]scale={width}:{width}:force_original_aspect_ratio=decrease:"
+                f"[1:v]{SDR_FILTER},scale={width}:{width}:force_original_aspect_ratio=decrease:"
                 "force_divisible_by=2:flags=lanczos,"
                 f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={SQUARE_BACKGROUND},"
             )
         script.write_text(
-            f"[0:v]fps={fps},settb=1/{fps},setpts=N,format=yuv420p[body];"
+            f"[0:v]{SDR_FILTER},fps={fps},settb=1/{fps},setpts=N[body];"
             f"{cover}"
             f"setsar=1,fps={fps},trim=end_frame={still},settb=1/{fps},"
             "setpts=N,format=yuv420p[intro];"
             f"[intro][body]xfade=transition=fade:duration={fade:.9f}:offset={offset:.9f},"
-            f"fps={fps},settb=1/{fps},setpts=N,format=yuv420p[out]",
+            f"fps={fps},settb=1/{fps},setpts=N,{SDR_FILTER}[out]",
             encoding="utf-8",
         )
         run_process(
@@ -152,6 +153,7 @@ def prepend_intro(
                 *quality,
                 "-pix_fmt",
                 "yuv420p",
+                *SDR_ENCODER_ARGS,
                 "-movflags",
                 "+faststart",
                 str(output),

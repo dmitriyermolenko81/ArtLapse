@@ -6,12 +6,15 @@ import sys
 
 from PySide6.QtCore import QCoreApplication
 
+from sculptcut import __version__
+
 APP_USER_MODEL_ID = "ArtLapse.Desktop"
 
 
 def configure_application_identity() -> None:
     """Run before QApplication creates any native windows (also in diagnostics)."""
     QCoreApplication.setApplicationName("ArtLapse")
+    QCoreApplication.setApplicationVersion(__version__)
     if sys.platform != "win32":
         return
     try:

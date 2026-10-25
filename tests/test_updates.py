@@ -150,7 +150,8 @@ def test_real_check_is_nonblocking_sends_no_project_data_and_deduplicates(
         assert len(results) == 1 and results[0][0] is not None and not results[0][1]
         assert len(http_release.requests) == 1
         request = http_release.requests[0]
-        assert request == {"method":"GET","path":"/latest","user_agent":"ArtLapse/0.1.1",
+        assert request == {"method":"GET","path":"/latest",
+                           "user_agent":f"ArtLapse/{checker.current}",
                            "body_length":"0","authorization":""}
     finally:
         timer.stop()

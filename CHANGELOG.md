@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2 — 2026-10-25
+
+- Keep SDR exports in consistently converted and tagged BT.709 limited range.
+- Prevent JPEG intros from changing the color format of the entire export.
+- Apply the same format to video chunks, still frames and presentation clips.
+- Show the application version in the top bar and window title; align GUI, CLI and update checks.
+- Strengthen decoded RGB color and detail regression checks for CPU and NVIDIA exports.
+
 ## 0.1.1 — 2026-10-24
 
 - Check GitHub releases in the background at startup or from the top toolbar.

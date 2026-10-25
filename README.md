@@ -2,7 +2,7 @@
 
 **English** | [Русский](README.ru.md)
 
-**[Download ArtLapse for Windows x64](https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.1/ArtLapse-0.1.1-Windows-x64.zip)** · [Release notes](https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.1)
+**[Download ArtLapse for Windows x64](https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.2/ArtLapse-0.1.2-Windows-x64.zip)** · [Release notes](https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.2)
 
 Extract the entire ZIP and run **ArtLapse.exe**. Python, Qt, FFmpeg and all required runtime files are included; no separate installation is needed.
 
@@ -51,9 +51,11 @@ Support is optional and is not required to download or use the application.
 
 ArtLapse edits existing recordings. No recorder or ZBrush plugin is required.
 
-Version **0.1.1** adds update notifications and fixes framing and scale when
-previously skipped clips are restored in music-synced Shorts. Manual cuts and
-episode timing are preserved.
+Version **0.1.2** keeps SDR export colors consistent when adding JPEG/PNG intros,
+still frames or presentation clips. The current version is visible beside ArtLapse
+and in the window title. Existing editing features and update checks are retained.
+
+![Visible application version](docs/images/app-version.png)
 
 ## Updates
 

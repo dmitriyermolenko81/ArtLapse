@@ -4,7 +4,7 @@ The full Windows ZIP is self-contained. The separate third-party source archive
 is optional for users and provides sources for rebuilding/replacing the libraries:
 https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.0/ArtLapse-0.1.0-ThirdParty-Sources.zip
 
-ArtLapse 0.1.1 uses the same dependency binaries as 0.1.0. This existing source
+ArtLapse 0.1.2 uses the same dependency binaries as 0.1.0. This existing source
 archive continues to apply; the new Windows ZIP includes the retained notices.
 
 ## Correspondence

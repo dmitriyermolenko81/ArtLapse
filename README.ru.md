@@ -2,7 +2,7 @@
 
 [English](README.md) | **Русский**
 
-**[Скачать ArtLapse для Windows x64](https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.1/ArtLapse-0.1.1-Windows-x64.zip)** · [Описание выпуска](https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.1)
+**[Скачать ArtLapse для Windows x64](https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.2/ArtLapse-0.1.2-Windows-x64.zip)** · [Описание выпуска](https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.2)
 
 Распакуйте ZIP целиком и запустите **ArtLapse.exe**. Python, Qt, FFmpeg и все необходимые компоненты уже внутри; отдельно устанавливать их не нужно.
 
@@ -50,9 +50,11 @@ ArtLapse распространяется бесплатно. Если прил�
 
 Это редактор существующих записей. Рекордер и плагин ZBrush не требуются.
 
-В версии **0.1.1** добавлены уведомления об обновлениях и исправлены
-кадрирование и масштаб возвращённых эпизодов музыкальных Shorts.
-Ручные вырезки и длительность эпизодов сохраняются.
+Версия **0.1.2** сохраняет согласованный цвет SDR-экспорта при добавлении
+JPEG/PNG-заставок, стоп-кадров и презентационного видео. Номер версии
+виден рядом с ArtLapse и в заголовке окна.
+
+![Версия программы в верхней панели](docs/images/app-version.png)
 
 ## Обновления
 

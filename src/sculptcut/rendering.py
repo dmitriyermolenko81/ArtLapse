@@ -26,6 +26,7 @@ from sculptcut.render_batches import coalesce_chunks
 from sculptcut.screen_cache import screen_check_cache
 from sculptcut.shorts_layout import SHORTS_PRESETS, square_composition, uses_square
 from sculptcut.subject_camera import camera_filter, still_frame
+from sculptcut.video_color import SDR_ENCODER_ARGS, SDR_FILTER
 
 # Encode intermediates with more detail than the final delivery encode.
 INTERMEDIATE_QUALITY = 16
@@ -92,7 +93,7 @@ def normalize_timing(
     # Chunk encodes can alternate between full and limited color range. Keep one
     # filter instance alive across those changes so setpts=N does not restart at
     # a chunk boundary and send timestamps back to zero.
-    filters = f"format=yuv420p,{filters}"
+    filters = f"{SDR_FILTER},{filters}"
     if bookend_plan is not None and (tail := final_frames(bookend_plan)):
         info = probe(source)
         filters += "," + bookend_filter(
@@ -162,6 +163,7 @@ def _normalize(
             *quality,
             "-pix_fmt",
             "yuv420p",
+            *SDR_ENCODER_ARGS,
             "-movflags",
             "+faststart",
             str(destination),
@@ -456,7 +458,7 @@ def _render(
                 f"setpts=PTS-STARTPTS,trim=duration={duration:.6f},setpts=PTS*{ratio:.12f},"
             )
             filter_path.write_text(
-                timing_filter +
+                SDR_FILTER + "," + timing_filter +
                 f"fps={fps},{crop_filter}{composition}setsar=1,{still_motion}"
                 f"tpad=stop_mode=clone:stop_duration={padding:.8f}",
                 encoding="utf-8",
@@ -481,6 +483,7 @@ def _render(
                     *codec_options,
                     "-pix_fmt",
                     "yuv420p",
+                    *SDR_ENCODER_ARGS,
                     str(temporary / name),
                 ],
                 cancel,

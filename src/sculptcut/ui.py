@@ -76,6 +76,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from sculptcut import __version__
 from sculptcut.analysis import analysis_key, extract_features
 from sculptcut.compact_label import CompactLabel
 from sculptcut.crop_dialog import TimelapseCropDialog, WebcamDialog
@@ -500,7 +501,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("ArtLapse")
+        self.setWindowTitle(f"ArtLapse {__version__}")
         application_icon = QIcon(str(Path(__file__).parent / "assets" / "logo.ico"))
         QApplication.setWindowIcon(application_icon)
         self.setWindowIcon(application_icon)
@@ -573,6 +574,9 @@ class MainWindow(QMainWindow):
         title = QLabel("ArtLapse")
         title.setObjectName("title")
         brand_layout.addWidget(title)
+        self.version_label = QLabel(f"v{__version__}")
+        self.version_label.setObjectName("sectionHint")
+        brand_layout.addWidget(self.version_label)
         brand_layout.addStretch()
         heading.addWidget(self.brand_header)
         self.mode_group = QButtonGroup(self)

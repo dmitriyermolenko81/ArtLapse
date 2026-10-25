@@ -1,4 +1,4 @@
-﻿ArtLapse 0.1.1 — первый запуск
+﻿ArtLapse 0.1.2 — первый запуск
 
 1. Сохраните всю папку программы в удобном месте, доступном для записи.
    Если программа получена в архиве, сначала распакуйте его целиком.
@@ -7,6 +7,7 @@
 4. Выберите режим, длительность, музыку и нажмите «Создать ролик».
    Готовое видео сохраняется в папке renders выбранного проекта.
 
+Версия программы показана рядом с ArtLapse и в заголовке окна.
 Кнопка RU / EN справа вверху переключает язык интерфейса.
 Python, FFmpeg и необходимые библиотеки уже включены в программу.
 Интернет для монтажа и экспорта не нужен. Исходные видео не изменяются.
@@ -234,5 +235,5 @@ Notices / Уведомления: _internal/THIRD_PARTY_NOTICES.md, _internal/li
 Source and replacement instructions: _internal/docs/RUNTIME_SOURCES.md
 The third-party source archive is optional and is not needed to run ArtLapse.
 Исходники библиотек не нужны для запуска готовой программы.
-Release: https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.1
+Release: https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.2
 Library sources (unchanged): https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.0/ArtLapse-0.1.0-ThirdParty-Sources.zip

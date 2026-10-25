@@ -8,6 +8,7 @@ from sculptcut.domain import ProjectSettings
 from sculptcut.media import discover, probe, run_process
 from sculptcut.project import fingerprint
 from sculptcut.shorts_layout import SHORTS_PRESETS, SQUARE_BACKGROUND, uses_square
+from sculptcut.video_color import SDR_ENCODER_ARGS, SDR_FILTER
 
 
 def presentation_frames(settings: ProjectSettings, fps: int) -> int:
@@ -65,7 +66,7 @@ def attach_presentation(
         clip = scratch / "clip.mp4"
         script = scratch / "filter.txt"
         script.write_text(
-            f"setpts=(PTS-STARTPTS)*{ratio:.12f},fps={fps},{composition}setsar=1,"
+            f"{SDR_FILTER},setpts=(PTS-STARTPTS)*{ratio:.12f},fps={fps},{composition}setsar=1,"
             f"tpad=stop_mode=clone:stop_duration={count / fps:.9f},"
             f"trim=end_frame={count},settb=1/{fps},setpts=N,format=yuv420p",
             encoding="utf-8",
@@ -75,7 +76,7 @@ def attach_presentation(
             "-reinit_filter", "0", "-i", str(video), "-map", f"0:{info.stream_index}",
             "-an", "-filter_script:v", str(script), "-frames:v", str(count),
             "-fps_mode", "passthrough", "-enc_time_base", f"1:{fps}",
-            "-c:v", encoder, *quality, "-pix_fmt", "yuv420p", str(clip),
+            "-c:v", encoder, *quality, "-pix_fmt", "yuv420p", *SDR_ENCODER_ARGS, str(clip),
         ], cancel)
         listing = scratch / "concat.txt"
         paths = [clip, body] if settings.presentation_position == "start" else [body, clip]
