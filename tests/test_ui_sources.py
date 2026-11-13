@@ -107,7 +107,7 @@ def test_result_actions_are_visible_beside_the_export_controls() -> None:
         save = next(
             button
             for button in window.output_editor.findChildren(QPushButton)
-            if button.text() == "Сохранить копию"
+            if button.text() == "Обновить предпросмотр"
         )
         assert save.objectName() == "primary"
     finally:
@@ -133,15 +133,15 @@ def test_mode_switches_are_in_settings_header_and_still_switch_modes() -> None:
         QTest.mouseClick(window.shorts_mode, Qt.MouseButton.LeftButton)
         assert window.shorts_mode.isChecked()
         assert window.preset.currentData() == "shorts"
-        assert window.mode_settings_title.text() == "Настройки Shorts"
+        assert window.mode_settings_title.text() == "3D · обычный"
         for control in (window.preset, window.duration_card, window.music, window.intro_image):
             assert window.mode_settings_panel.isAncestorOf(control)
         buttons = [b for b in window.preset.buttons.values() if b.isVisible()]
-        assert len(buttons) == 6
+        assert len(buttons) == 4
         assert len({b.geometry().top() for b in buttons}) == 1
         assert all(not b.icon().isNull() for b in buttons)
         assert all(b.geometry().right() < window.preset.width() for b in buttons)
-        for preset in ("music_shorts", "beat_shorts", "photoshop_shorts", "photoshop_beat_shorts",
+        for preset in ("music_shorts", "photoshop_shorts",
                        "photoshop_music_shorts"):
             button = window.preset.buttons[preset]
             QTest.mouseClick(button, Qt.MouseButton.LeftButton)
@@ -157,7 +157,7 @@ def test_mode_switches_are_in_settings_header_and_still_switch_modes() -> None:
         QTest.mouseClick(window.timelapse_mode, Qt.MouseButton.LeftButton)
         assert window.timelapse_mode.isChecked()
         assert window.preset.currentData() == "timelapse"
-        assert window.mode_settings_title.text() == "Настройки таймлапса"
+        assert window.mode_settings_title.text() == "Таймлапс · эпизоды"
     finally:
         window.close()
         app.processEvents()
@@ -172,7 +172,7 @@ def test_top_mode_switch_controls_format_duration_and_crop() -> None:
         assert window.timelapse_mode.isChecked()
         assert window.frame_mode.isVisible()
         window.preset.setCurrentIndex(window.preset.findData("speed"))
-        assert "без удаления" in window.preset.buttons["speed"].toolTip()
+        assert "ручных вырезок" in window.preset.buttons["speed"].toolTip()
         assert not hasattr(window, "preset_hint")
         window.shorts_mode.click()
         assert window.preset.currentData() == "shorts"
@@ -191,7 +191,8 @@ def test_top_mode_switch_controls_format_duration_and_crop() -> None:
         assert window.target.value() == 300
         assert window.duration_card.seconds.value() == 0
         window.preset.setCurrentIndex(window.preset.findData("beat_shorts"))
-        assert "музыки" in window.preset.buttons["beat_shorts"].toolTip()
+        assert window.preset.currentData() == "music_shorts"
+        assert "музыкальные" in window.preset.buttons["music_shorts"].toolTip()
         window.timelapse_mode.click()
         assert window.preset.currentData() == "speed"
         assert window.duration_card.isVisible()
@@ -515,7 +516,8 @@ def test_edit_existing_sources_and_open_outputs(
         assert saved.sources[1].id not in {s.id for s in project.sources}
         assert saved.sources[1].global_start_us == saved.sources[0].duration_us
         assert retained_proxy.stat().st_mtime_ns == retained_modified
-        output = root / "renders" / "timelapse-001_timelapse.mp4"
+        output = window.last_result_video
+        assert output.parent == root / "previews"
         verify_output(output, 180, 30)
         window.open_video(output, "Готовый ролик")
         frame_deadline = time.monotonic() + 5
@@ -525,6 +527,9 @@ def test_edit_existing_sources_and_open_outputs(
         assert window.video_frames_seen > 0
         app.processEvents()
         assert window.viewer_scroll.horizontalScrollBar().maximum() == 0
+        assert not window.outputs_button.isEnabled()  # Preview is not a final export.
+        shutil.copyfile(output, root / "renders" / "exported.mp4")
+        window.update_result_actions()
         window.outputs_button.click()
         assert Path(opened[-1].toLocalFile()) == root / "renders"
         window.sources.selectAll()

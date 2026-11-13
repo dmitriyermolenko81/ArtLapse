@@ -45,7 +45,14 @@ QLabel#settingsCategory { color:#b4cadc; font-size:12px; font-weight:600; }
 QLabel#settingsSubLabel { color:#91a3b5; font-size:11px; }
 QWidget#exportBar { background:#181e26; border:0; border-radius:10px; }
 QWidget#resultActionsBar { background:#171e27; border:0; border-radius:9px; }
-QWidget#versionsPanel { background:#151b23; border:0; border-radius:9px; }
+QWidget#versionsPanel { background:transparent; border:0; }
+QLabel#playbackTime { color:#aebed1; font-size:12px; }
+QToolButton#compactPlay { background:#284464; border:1px solid #46688e;
+ border-radius:5px; padding:0; }
+QToolButton#compactPlay:hover { background:#365b81; border-color:#7fa9d7; }
+QToolButton#compactPlay:pressed { background:#20364f; }
+QToolButton#compactPlay:disabled { background:#202832; border-color:#303e50; }
+QToolButton#compactPlay:focus { border:1px solid #a9cbff; }
 QFrame#videoDropZone { background:#0b1017; border:0; border-radius:10px; }
 QFrame#videoDropZone QLabel#dropTitle { font-size:17px; }
 QFrame#videoDropZone QLabel#dropHint { font-size:11px; }
@@ -64,6 +71,7 @@ QLineEdit,QSpinBox,QDoubleSpinBox,QListWidget,QTextEdit,QPlainTextEdit {
 QLineEdit:focus,QSpinBox:focus,QDoubleSpinBox:focus,QTextEdit:focus,QPlainTextEdit:focus {
  border:1px solid #82acff; }
 QComboBox {
+ combobox-popup:0;
  background:#111620; color:#e9edf5; border:1px solid #44516a; border-radius:7px;
  padding:7px 42px 7px 10px; selection-background-color:#4267a5;
 }
@@ -81,6 +89,7 @@ QComboBox#versionsChoice::drop-down {
  border:1px solid #44516a; border-radius:4px;
 }
 QComboBox QAbstractItemView {
+ qproperty-verticalScrollBarPolicy:ScrollBarAsNeeded;
  background:#171d28; border:1px solid #52617a; outline:0; padding:4px;
  selection-background-color:#365889; selection-color:#fff;
 }
@@ -101,6 +110,7 @@ QPushButton:disabled { color:#8891a0; background:#20252e; border-color:#2b303a; 
 QWidget#cutSection {
  background:#14282b; border:1px solid #376369; border-radius:8px;
 }
+QWidget#cutSection[inlineEditing="true"] { background:transparent; border:0; }
 QWidget#outputCutPanel { background:transparent; border:0; }
 QPushButton[actionRole="disclosure"] {
  background:transparent; border:0; border-radius:7px; padding:8px 10px;
@@ -193,9 +203,6 @@ QProgressBar { background:#171b24; border:1px solid #343d4f; border-radius:6px;
  text-align:center; min-height:12px; }
 QProgressBar::chunk { background:#6b94df; border-radius:4px; }
 QScrollArea { border:0; background:transparent; }
-QScrollBar:vertical { background:transparent; width:8px; margin:2px; }
-QScrollBar::handle:vertical { background:#3a465a; min-height:28px; border-radius:4px; }
-QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical { height:0; }
 QSplitter::handle { background:#0f1218; }
 """
 
@@ -220,9 +227,25 @@ QSlider::handle:horizontal { width:14px; margin:-5px 0; background:#a9cbff;
 QSlider::handle:horizontal:hover { background:#d2e6ff; }
 QSlider:disabled { background:transparent; }
 QSlider::handle:horizontal:disabled { background:#485465; border-color:#607089; }
-QScrollBar:horizontal { background:transparent; height:8px; margin:2px; }
-QScrollBar::handle:horizontal { background:#3a465a; min-width:28px; border-radius:4px; }
-QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal { width:0; }
+
+QScrollBar { background:transparent; border:0; padding:0; }
+QScrollBar:vertical { width:12px; margin:0; }
+QScrollBar:horizontal { height:12px; margin:0; }
+QScrollBar::handle { background:#526b86; border:0; border-radius:3px; }
+QScrollBar::handle:vertical { min-height:28px; margin:2px 3px; }
+QScrollBar::handle:horizontal { min-width:28px; margin:3px 2px; }
+QScrollBar::handle:hover { background:#7399bf; }
+QScrollBar::handle:pressed { background:#91b6db; }
+QScrollBar::handle:disabled { background:#303e4f; }
+QScrollBar::add-line,QScrollBar::sub-line {
+ background:transparent; border:0; width:0; height:0;
+ subcontrol-origin:margin;
+}
+QScrollBar::add-page,QScrollBar::sub-page { background:transparent; border:0; }
+QScrollBar::up-arrow,QScrollBar::down-arrow,
+QScrollBar::left-arrow,QScrollBar::right-arrow { image:none; width:0; height:0; }
+QAbstractScrollArea::corner { background:transparent; border:0; }
+
 QToolTip { background:#202b3a; color:#e9edf5; border:1px solid #52627c; padding:6px; }
 """
 STYLE = STYLE.replace("__CHEVRON__", (Path(__file__).parent / "assets/chevron-down.svg").as_posix())

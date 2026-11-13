@@ -2,91 +2,78 @@
 
 **English** | [Русский](README.ru.md)
 
-**[Download ArtLapse for Windows x64](https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.2/ArtLapse-0.1.2-Windows-x64.zip)** · [Release notes](https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.2)
+**[Download ArtLapse 0.1.3 for Windows x64](https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.3/ArtLapse-0.1.3-Windows-x64.zip)** · [Release notes](https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.3)
 
-Extract the entire ZIP and run **ArtLapse.exe**. Python, Qt, FFmpeg and all required runtime files are included; no separate installation is needed.
+Extract the entire ZIP and run **ArtLapse.exe**. Python, Qt and FFmpeg are included.
 
 <img src="src/sculptcut/assets/logo.png" alt="ArtLapse logo" width="88">
 
-A local editing tool for artists: turn recordings of your creative process into
-timelapses and Shorts, then refine the result with manual edits.
-The interface supports English and Russian. The primary platform is Windows x64.
+Turn recordings of your creative process into timelapses and Shorts, then refine
+the result with video and music editing. ArtLapse runs locally and supports English
+and Russian. The primary platform is Windows x64.
 
-![ArtLapse in action: playing a music-synced Short](docs/images/en/playback.gif)
+![ArtLapse 0.1.3: video preview and independent video/music timelines](docs/images/en/workspace.png)
 
-Actual application footage: source recordings on the left, the finished video in
-the center, and editing settings on the right. This example shows ZBrush sculpting
-and a one-minute music-synced Short.
-[Open the full-resolution screenshot](docs/images/en/workspace.png).
+Actual application screenshot with a ZBrush sculpting recording. The preview stays
+above two compact timelines; editing remains in the main window.
+
+## New in 0.1.3
+
+- One source episode catalogue for every mode; modes choose different excerpts from it.
+- Shared manual source corrections and reusable completed analysis, with cache status.
+- Compact video and music timelines inside the main window, with independent edits.
+- Real audio waveforms inside music clips, loaded in the background and cached.
+- Split, trim and delete music sections without overwriting the following clips.
+- Optional fade-in and fade-out curves added from the clip's right-click menu.
+- Hover shortcuts: Q to split, Delete to remove, Ctrl+Z / Ctrl+Y to undo / redo.
+- Space to play or pause, with protection while typing, dragging or using dialogs.
+- Music editing is locked for beat-synced versions to preserve their timing.
+- Playback starts at the beginning, including the intro or presentation.
+- Refined audio preview synchronization and modern scrollbars, including version lists.
+
+The obsolete still-frame-to-music presets have been removed from the mode selector.
+Existing projects retain compatibility.
+
+| Music waveforms | Optional volume fades |
+| --- | --- |
+| ![Waveform inside the music clips](docs/images/en/music-waveform.png) | ![Manually added fade curves](docs/images/en/music-fades.png) |
+
+## Edit directly on the timeline
+
+Hover over the **video** or **music** lane and press **Q** to split at the mouse
+position. No click to activate the lane is needed. Use **Delete**, **Ctrl+Z** and
+**Ctrl+Y** on that lane; **Space** controls playback. Drag a clip's edges to trim it.
+Apply edits to produce a new version while keeping the previous result.
+
+Right-click a music fragment to add or remove a fade. Fades are off by default.
+Add a track in a free gap: it stops before the next fragment and preserves the
+music already there. Beat-synced versions show music as read-only.
 
 ## From recording to finished video
 
-| Choose your framing | Trim the result |
+1. Create or open a project and add MP4, MKV or MOV recordings.
+2. Choose a mode, duration, framing, music and an optional intro/presentation.
+3. Create the video; completed compatible analysis is reused.
+4. Review and adjust episodes, video and music. Original recordings stay unchanged.
+
+| Section | Modes |
 | --- | --- |
-| [![Choosing a square Shorts frame on a ZBrush recording](docs/images/en/framing.png)](docs/images/en/framing.png) | [![Trimming a finished video with a selected timeline range](docs/images/en/trimming.png)](docs/images/en/trimming.png) |
-| Move and resize the frame. This screenshot shows the square framing dialog for Shorts. | Select an unwanted section on the timeline. After cutting it, you can save a separate copy of the video. |
+| TIMELAPSE | Episode selection or continuous speed-up |
+| SHORTS | 3D or Photoshop video episodes, with optional beat synchronization |
 
-| Review episodes | Reuse your settings |
-| --- | --- |
-| [![Compact episode review with the first episode selected](docs/images/en/episodes.png)](docs/images/en/episodes.png) | [![One-row settings template selector](docs/images/en/templates.png)](docs/images/en/templates.png) |
-| Review the source preview and compact episode cards. The selected episode is remembered when you reopen the window. | Save and apply settings using the list, plus, checkmark, and trash icons. During creation, the plus becomes a cancel button. |
+Shorts support vertical and square layouts. Intro and presentation sections fit
+within the total duration. Final exports use original recordings; previews may use proxies.
+Projects, versions and settings templates let you resume work later.
 
-Click an image to view the interface at full resolution.
-These are screenshots of the running application with a real project.
+## Updates and support
 
-ArtLapse is free to use. If it saves you time, you can
-[support development on Boosty](https://boosty.to/manson93).
-Support is optional and is not required to download or use the application.
+ArtLapse checks GitHub for updates in the background. The circular-arrow button
+checks again. Download the new ZIP and extract it into a separate folder. To keep
+preferences, close ArtLapse and copy the previous application's **data** folder to
+the new one. Keep projects and source media in place. [Update guide](docs/updates.md).
 
-## Features
-
-- Activity analysis, idle-time reduction, and editing to a target duration.
-- Timelapses, straightforward speed-up, Shorts, and cuts timed to musical accents.
-- Video framing, with vertical and square layouts.
-- Your own music, an intro image, and a separate project presentation clip.
-- Episode review, manual exclusions, trimming, undo, and redo.
-- Saved projects, video variants, reusable analysis caches, and settings templates.
-- Background update checks at startup and a manual check button in the top bar.
-- Local processing; final exports use the original recordings without changing them.
-
-ArtLapse edits existing recordings. No recorder or ZBrush plugin is required.
-
-Version **0.1.2** keeps SDR export colors consistent when adding JPEG/PNG intros,
-still frames or presentation clips. The current version is visible beside ArtLapse
-and in the window title. Existing editing features and update checks are retained.
-
-![Visible application version](docs/images/app-version.png)
-
-## Updates
-
-ArtLapse checks GitHub in the background at startup. The circular-arrow button
-beside **RU / EN** checks again. A new version opens a compact **Download / Later**
-prompt. Download opens the complete Windows ZIP in your browser; installation
-is manual. Offline editing and exporting remain available.
-
-![Manual update check in ArtLapse 0.1.1](docs/images/en/updates.png)
-
-Extract the new ZIP into a separate folder. To keep preferences, close ArtLapse
-and copy `data` from the previous application folder to the new one. Keep your
-projects and original media in place. [Update details](docs/updates.md).
-
-## Editing modes
-
-| Section | Mode | Result |
-| --- | --- | --- |
-| TIMELAPSE | Episodes | Key stages of the creative process, with detected pauses reduced |
-| TIMELAPSE | Speed-up | An accelerated recording without automatic cuts |
-| SHORTS | 9:16 | A short vertical edit of sculpting episodes |
-| SHORTS | Music-synced episodes | Moving video excerpts with cuts timed to musical accents |
-| SHORTS | Music-synced still frames | Still images that change to the rhythm of the music |
-| SHORTS | Photoshop 9:16 | A drawing-process edit framed within the canvas |
-| SHORTS | Photoshop: music-synced episodes | Moving excerpts of the drawing process, timed to musical accents |
-| SHORTS | Photoshop: music-synced still frames | Still images of drawing stages, timed to the music |
-
-Shorts support vertical and square layouts. The intro and presentation clip fit
-within the selected total duration. When a presentation clip is selected, the
-intro image is omitted. In square music-synced video episodes, the camera stays
-fixed within each episode; rotations and zooms recorded in the source remain visible.
+ArtLapse is free to use. Optional [support on Boosty](https://boosty.to/manson93)
+is not required to download or use the application.
 
 ## Run from source
 
@@ -117,16 +104,6 @@ In the application, create a project with **+**, add your recordings, choose a
 mode, duration, and music, then click **Create video**. The **RU / EN** button in
 the upper-right corner changes the interface language. Scroll to adjust duration;
 click a number with the left mouse button to type a value.
-
-Trimming opens above its toolbar and reduces the preview height without resizing
-the application. **Save copy** offers **Just cut** or **Cut and keep duration**.
-Keeping duration works across all eight modes when enough source material is
-available; it restores an intro or presentation section removed by the trim and
-fills the remaining time with the edited body. The previous version is preserved.
-
-Trims and episode changes are combined. **Create video** also includes pending
-trims before you save a separate copy. The trash button beside the version list
-deletes the selected generated version, with confirmation.
 
 **Templates** in the top toolbar stores named sets of editing settings. Use **+**
 to enter a new name in the same row, **✓** to save or apply, and the trash icon to

@@ -169,9 +169,10 @@ def test_real_trash_button_cancel_then_delete_open_versions(
             wait_job(window)
             assert not video.exists()
         assert len(confirmations) == 3
-        assert window.variants.count() == 0 and window.player.source().isEmpty()
-        assert not window.delete_variant_button.isEnabled()
-        assert not window.versions_panel.isVisible()
+        assert window.variants.count() == 1
+        assert Path(window.variants.itemData(0)) == root / "previews/готовый.mp4"
+        assert window.delete_variant_button.isEnabled()
+        assert window.versions_panel.isVisible()
         assert (root.parent / "исходник.mp4").is_file()
         assert (root / "previews/готовый.mp4").is_file()
     finally:
@@ -232,6 +233,9 @@ def test_deleting_keeps_geometry_during_worker_and_neighbour_reload(
 
     app = QApplication.instance() or QApplication([])
     root = project_root
+    preview = root / "previews/готовый.mp4"
+    metadata_path(preview, ".variant.json").unlink()
+    preview.unlink()
     selected = root / "renders/готовый.mp4"
     if not last:
         selected.with_name("remaining.mp4").write_bytes(selected.read_bytes())

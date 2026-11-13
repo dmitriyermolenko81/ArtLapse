@@ -32,6 +32,7 @@ class Validation:
             "PYTHONPATH": str(ROOT / "src"),
             "PYTHONIOENCODING": "utf-8",
             "SCULPTCUT_DATA_DIR": str(workspace / "data"),
+            "ARTLAPSE_DATA_DIR": str(workspace / "data"),
         })
         self.report: dict[str, object] = {
             "status": "RUNNING", "python": sys.executable,
@@ -128,15 +129,20 @@ class Validation:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, help="New directory for logs and synthetic media")
+    parser.add_argument("--isolated-tests", action="store_true",
+                        help="Run each test module in a fresh process (Qt runtime isolation)")
     args = parser.parse_args()
     workspace = args.workspace or ROOT / "artifacts" / f"validation-{uuid4().hex[:12]}"
     validation = Validation(workspace.resolve())
     try:
-        for name, arguments in (
-            ("pytest", ["pytest", "-q"]),
+        test_steps = (
+            [(f"pytest-{path.stem}", ["pytest", "-q", str(path)])
+             for path in sorted((ROOT / "tests").glob("test_*.py"))]
+            if args.isolated_tests else [("pytest", ["pytest", "-q"])])
+        for name, arguments in [*test_steps,
             ("ruff", ["ruff", "check", "."]),
             ("mypy", ["mypy", "src"]),
-        ):
+        ]:
             validation.run(name, [sys.executable, "-m", *arguments], timeout=3600)
         validation.smoke()
         validation.report["status"] = "PASS"

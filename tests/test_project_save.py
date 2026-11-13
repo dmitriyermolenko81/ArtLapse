@@ -80,6 +80,7 @@ def test_music_mode_restores_automatic_sync_from_legacy_project(
 ) -> None:
     from sculptcut.domain import ProjectSettings
     from sculptcut.project import create_project, save_project
+    from sculptcut.shorts_layout import RETIRED_STILL_PRESETS
 
     app = QApplication.instance() or QApplication([])
     source = tmp_path / "input.mp4"
@@ -91,15 +92,19 @@ def test_music_mode_restores_automatic_sync_from_legacy_project(
         "preset": preset, "beat_sync_enabled": False, "beat_sync_strength": 0,
     })})
     save_project(root, project)
+    before = (root / "project.json").read_bytes()
     window = MainWindow()
     try:
         window.open_project_folder(root)
-        assert window.preset.currentData() == preset
+        selected = RETIRED_STILL_PRESETS.get(preset, preset)
+        assert window.preset.currentData() == selected
+        assert (root / "project.json").read_bytes() == before
         assert not hasattr(window, "beat_sync")
         assert "beat_sync" not in window.form_draft()
         window.save_button.click()
         wait_job(window, app)
         settings = load_project(root).settings
+        assert settings.preset == selected
         assert settings.beat_sync_enabled
         assert settings.beat_sync_strength == 1
         assert settings.beat_sync_mode == "fast"
@@ -172,7 +177,7 @@ def test_draft_recovers_incomplete_form(monkeypatch: pytest.MonkeyPatch) -> None
         second.recover_session()
         assert second.output_name.text() == "Черновик"
         assert second.target.value() == 0
-        assert second.preset.currentData() == "photoshop_beat_shorts"
+        assert second.preset.currentData() == "photoshop_music_shorts"
         assert not hasattr(second, "beat_sync")
         assert second.square_rois == first.square_rois
         assert second.normal_minutes == 23

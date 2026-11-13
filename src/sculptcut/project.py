@@ -160,6 +160,8 @@ def replace_sources(project: Project, paths: list[Path]) -> Project:
             "sources": sources,
             "rois": {sid: roi for sid, roi in project.rois.items() if sid in ids},
             "overrides": [o for o in project.overrides if o.source_id in ids],
+            "source_splits": {sid: points for sid, points in project.source_splits.items()
+                              if sid in ids},
         }
     )
 

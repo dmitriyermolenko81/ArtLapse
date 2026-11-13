@@ -83,11 +83,15 @@ def episodic_photoshop_plan(
         chapter_end = total * (chapter + 1) // chapters
         midpoint = (chapter_start + chapter_end) // 2
         options: list[tuple[float, int, int, int, int]] = []
-        candidates = STORY.candidates if score_window else 1
-        for part in range(candidates):
-            position = chapter_start + (chapter_end - chapter_start) * (2 * part + 1) // (
-                2 * candidates
-            )
+        available = [(max(chapter_start, a), min(chapter_end, b), index)
+                     for a, b, index in spans if a < chapter_end and b > chapter_start]
+        positions = [(a+b)//2 for a, b, _ in available]
+        if (not base.settings.get("complete_short_catalogue")
+                or base.settings.get("short_catalogue_fallback")):
+            candidates = STORY.candidates if score_window else 1
+            positions = [chapter_start + (chapter_end - chapter_start) * (2 * part + 1)
+                         // (2 * candidates) for part in range(candidates)]
+        for position in positions:
             left, right, index = next((a, b, i) for a, b, i in spans if a <= position < b)
             decision = prepared[index]
             length = min(STORY.episode_us, right - left)

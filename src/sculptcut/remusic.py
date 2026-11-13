@@ -29,6 +29,7 @@ def replace_music(
     """Use a single audio file or a library folder; preserve the previous export."""
     project = load_project(root)
     previous = read_variant(video)
+    draft = bool((previous.get("plan") or {}).get("settings", {}).get("draft"))
     snapshot_project = (
         Project.model_validate(previous["project"]) if previous.get("project") else None
     )
@@ -66,7 +67,7 @@ def replace_music(
         render_project = (snapshot_project or project).model_copy(update={"settings": settings})
         plan = plan_project(root, render_project, settings.target_seconds, cancel, progress)
         render(
-            root, render_project, plan, destination, cancel, progress=progress,
+            root, render_project, plan, destination, cancel, progress=progress, preview=draft,
             variant_parent=video, variant_operation="music",
         )
     else:

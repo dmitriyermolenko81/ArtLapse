@@ -5,16 +5,19 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
+from types import TracebackType
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from sculptcut.domain import Roi, SourceMedia
+from sculptcut.domain import Project, Roi, SourceMedia
 from sculptcut.media import Cancelled, MediaError, discover, run_process
-from sculptcut.photoshop import drawing_box
+from sculptcut.photoshop import drawing_and_canvas_box, drawing_box
 from sculptcut.project import cache_get, cache_key, cache_put
-from sculptcut.webcam import AnalysisCapture
+from sculptcut.roi import pixel_bounds
+from sculptcut.visual_transitions import SETTINGS as VIEW_SETTINGS
+from sculptcut.webcam import AnalysisCapture, webcam_roi
 
 
 @dataclass(frozen=True)
@@ -29,6 +32,54 @@ class StabilitySettings:
 
 
 SETTINGS = StabilitySettings()
+
+
+class DrawingViews:
+    """Bounded canvas-only signatures, with one reusable reader per source."""
+
+    def __init__(self, project: Project, cancel: Event | None = None) -> None:
+        self.project, self.cancel = project, cancel
+        self.readers: dict[str, AnalysisCapture] = {}
+        self.cache: dict[tuple[str, int], NDArray[np.uint8] | None] = {}
+
+    def __enter__(self) -> "DrawingViews":
+        return self
+
+    def __exit__(self, exc_type: type[BaseException] | None, exc: BaseException | None,
+                 traceback: TracebackType | None) -> None:
+        for reader in self.readers.values():
+            reader.release()
+
+    def signature(self, source: SourceMedia, time_us: int) -> NDArray[np.uint8] | None:
+        if self.cancel and self.cancel.is_set():
+            raise Cancelled("Drawing transition inspection cancelled")
+        key = (source.id, time_us)
+        if key in self.cache:
+            return self.cache[key]
+        reader = self.readers.get(source.id)
+        if reader is None:
+            reader = AnalysisCapture(source.path, webcam_roi(self.project.settings, source.id))
+            self.readers[source.id] = reader
+        reader.set(cv2.CAP_PROP_POS_MSEC, time_us / 1000)
+        ok, frame = reader.read()
+        view = None
+        if ok:
+            h, w = frame.shape[:2]
+            width = min(w, VIEW_SETTINGS.read_width)
+            image = cv2.resize(frame, (width, max(1, round(h * width / w)))).astype(np.uint8)
+            canvas = self.project.rois.get(source.id)
+            if canvas is None:
+                _, canvas = drawing_and_canvas_box(image)
+            if canvas is not None:
+                x, y, right, bottom = pixel_bounds(canvas, image.shape[1], image.shape[0])
+                region = cv2.cvtColor(image[y:bottom, x:right], cv2.COLOR_BGR2GRAY)
+                view = cv2.resize(region, (VIEW_SETTINGS.signature_size,
+                                          VIEW_SETTINGS.signature_size),
+                                  interpolation=cv2.INTER_AREA).astype(np.uint8)
+        self.cache[key] = view
+        if len(self.cache) > VIEW_SETTINGS.cache_entries:
+            self.cache.pop(next(iter(self.cache)))
+        return view
 
 
 def stability_score(frames: Iterable[NDArray[np.uint8]]) -> float:

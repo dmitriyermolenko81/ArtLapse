@@ -429,7 +429,7 @@ def test_vertical_render_and_preview_real_video(tmp_path: Path, with_model: bool
             encoder="libx264",
         )
         info = probe(output)
-        assert (info.width, info.height) == ((360, 640) if preview else (1080, 1920))
+        assert (info.width, info.height) == (1080, 1920)
         verify_output(output, 90, 30)
 
 

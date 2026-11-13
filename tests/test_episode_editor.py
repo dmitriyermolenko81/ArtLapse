@@ -1,9 +1,10 @@
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QMenu
 from test_timeline import make_source
 
-from sculptcut.domain import Override, Project
+from sculptcut.domain import Override, Project, ProjectSettings
 from sculptcut.episode_editor import EpisodeEditor, edit_episode
 from sculptcut.overrides import apply_overrides
 from sculptcut.planning import build_plan
@@ -32,9 +33,12 @@ def test_replacing_edit_preserves_neighbours() -> None:
 
 def test_menu_persists_slow_drop_and_restore(tmp_path: Path) -> None:
     app = QApplication.instance() or QApplication([])
-    project = Project(sources=[make_source(0, 0, 10_000_000)])
+    project = Project(
+        sources=[make_source(0, 0, 10_000_000), make_source(1, 10_000_000, 10_000_000)],
+        settings=ProjectSettings(preset="speed", final_view_seconds=0),
+    )
     save_project(tmp_path, project)
-    plan = build_plan(project, [], 2)
+    plan = build_plan(project, [], 4)
     (tmp_path / "render_plan.json").write_text(plan.model_dump_json(), encoding="utf-8")
     editor = EpisodeEditor()
     editor.load(tmp_path)
@@ -42,15 +46,20 @@ def test_menu_persists_slow_drop_and_restore(tmp_path: Path) -> None:
     editor.failed.connect(errors.append)
     try:
         for action, expected in ((2, "SET_SPEED"), (1, "DROP"), (0, "SET_SPEED")):
+            decision = editor.item(0).data(Qt.ItemDataRole.UserRole)
             editor.choose(editor.item(0))
             menu = editor.findChildren(QMenu)[-1]
             menu.actions()[action].trigger()
             menu.close()
             saved = load_project(tmp_path)
-            assert saved.overrides[0].action == expected
+            rule = next(o for o in saved.overrides if o.source_id == decision.source_id
+                        and o.start_us == decision.source_start_us
+                        and o.end_us == decision.source_end_us)
+            assert rule.action == expected
             if action == 2:
-                assert saved.overrides[0].speed == 2.5
+                assert rule.speed == 2.5
             editor.load(tmp_path)
+            assert not errors
             assert editor.count() > 0
         assert not errors
     finally:

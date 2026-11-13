@@ -1,6 +1,7 @@
 """One fixed crop rectangle for the complete ordinary timelapse."""
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import cv2
 from PySide6.QtCore import QPointF, QRectF, Qt, QThread, Signal
@@ -19,10 +20,26 @@ from PySide6.QtWidgets import (
 from sculptcut.cropping import fit_video_aspect
 from sculptcut.domain import Roi
 from sculptcut.i18n import tr
+from sculptcut.media import discover, probe, run_process
 from sculptcut.ui_theme import DialogButtons, apply_dialog_theme, dialog_header
 
 
 def preview_frame(path: Path, fraction: float = 0.1) -> QImage:
+    if path.suffix.lower() in ('.mpg', '.mpeg'):
+        # Elementary MPEG can expose an estimated frame count to OpenCV.
+        # Decode the requested time using the verified duration instead.
+        info = probe(path)
+        timestamp = max(0, min(0.99, fraction)) * (info.duration_us or 0) / 1_000_000
+        with TemporaryDirectory(prefix='mpeg-thumbnail-') as directory:
+            target = Path(directory)/'frame.png'
+            run_process([discover('ffmpeg'), '-v', 'error', '-i', str(path),
+                '-ss', f'{timestamp:.6f}', '-frames:v', '1', '-vf',
+                'scale=800:480:force_original_aspect_ratio=decrease',
+                '-threads', '1', str(target)])
+            image = QImage(str(target))
+        if image.isNull():
+            raise ValueError('Cannot read MPEG source frame')
+        return image
     capture = cv2.VideoCapture(str(path))
     try:
         if not capture.isOpened():

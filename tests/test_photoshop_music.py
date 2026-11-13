@@ -145,7 +145,7 @@ def test_drawing_music_real_video_audio_preview_and_remusic(tmp_path: Path, layo
                         preview=preview, encoder="libx264")
         verify_output(output, 180, 30, expected_audio=True)
         metadata = probe(output)
-        assert (metadata.width, metadata.height) == ((360, 640) if preview else (1080, 1920))
+        assert (metadata.width, metadata.height) == (1080, 1920)
         capture = cv2.VideoCapture(str(output))
         try:
             ok, a = capture.read()
@@ -177,4 +177,10 @@ def test_drawing_music_real_video_audio_preview_and_remusic(tmp_path: Path, layo
             changed_plan.settings["beat_sync_total_cuts"]
         )
         verify_output(changed, 180, 30, expected_audio=True)
+        # A musical rebuild remains a draft at the original-quality export size.
+        draft_changed = replace_music(root, tmp_path / "episodes-True.mp4", folder, 18, None)
+        draft_state = read_variant(draft_changed)
+        assert draft_state["plan"]["settings"]["draft"] == 1
+        assert (probe(draft_changed).width, probe(draft_changed).height) == (1080, 1920)
+        verify_output(draft_changed, 180, 30, expected_audio=True)
     assert fingerprint(video) == before

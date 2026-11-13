@@ -224,7 +224,8 @@ def test_beat_shorts_is_a_seconds_based_gui_preset(tmp_path: Path) -> None:
         window.preset.setCurrentIndex(window.preset.findData("beat_shorts"))
         assert window.duration_in_seconds
         assert window.target.value() == 60
-        assert window.output_suffix.text() == "_beat_shorts.mp4"
+        assert window.preset.currentData() == "music_shorts"
+        assert window.output_suffix.text() == "_music_shorts.mp4"
         assert "Сменить музыку и пересобрать" in window.change_music_button.text()
         folder = tmp_path / "music"
         folder.mkdir()

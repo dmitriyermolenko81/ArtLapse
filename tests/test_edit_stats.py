@@ -41,7 +41,7 @@ def test_statistics_show_timelapse_episode_count_for_selected_duration() -> None
     assert "Эпизодов: 2" in statistics_text(plan)
 
 
-def test_statistics_count_retained_ranges_and_merge_adjacent_fragments() -> None:
+def test_statistics_count_each_numbered_timeline_block() -> None:
     plan = _plan(
         [
             _decision(0, 5_000_000, "SPEED", "one"),
@@ -50,7 +50,7 @@ def test_statistics_count_retained_ranges_and_merge_adjacent_fragments() -> None
             _decision(10_000_000, 12_000_000, "SPEED", "another"),
         ]
     )
-    assert "Эпизодов: 2" in statistics_text(plan)
+    assert "Эпизодов: 3" in statistics_text(plan)
 
 
 def test_statistics_count_music_stills_as_distinct_episodes() -> None:
@@ -89,4 +89,4 @@ def test_statistics_count_process_shorts_episodes_after_crop_splitting() -> None
         ],
         preset="shorts",
     )
-    assert "Эпизодов: 3" in statistics_text(plan)
+    assert "Эпизодов: 4" in statistics_text(plan)

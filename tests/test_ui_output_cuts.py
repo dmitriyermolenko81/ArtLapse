@@ -140,12 +140,19 @@ def test_save_short_cuts_obeys_explicit_choice(
             timeout.stop()
         assert window.job is None, "Saving cuts did not finish"
         assert window.job_succeeded, window.last_error
-        result = video.with_name("short-edit-001.mp4")
+        result = window.last_result_video
+        assert result is not None and result != video
+        assert result.parent == root / ("previews" if state.get("plan") else "renders")
         expected = 3 if history == "insufficient" else 18 if refilled else 12
         verify_output(result, expected, 30)
         saved = read_variant(result)
         assert saved["operation"] == ("duration_refill" if refilled else "cut")
-        assert saved["parent"] == video.name
+        if state.get("plan"):
+            parent = result.with_name(saved["parent"])
+            assert parent.is_file()
+            assert read_variant(parent)["parent"] == video.name
+        else:
+            assert saved["parent"] == video.name
         assert saved["cuts_us"] == [list(cut) for cut in cuts]
         if history == "relocated":
             assert saved["project"]["sources"][0]["path"] == str(moved.resolve())

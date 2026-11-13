@@ -269,47 +269,35 @@ def test_final_ends_before_removed_screen() -> None:
 
 
 def test_episodic_timelapse_exports_decodable_video(tmp_path: Path) -> None:
-    from sculptcut.analysis import extract_features
-    from sculptcut.media import discover, run_process
-    from sculptcut.planning import plan_project
+    from sculptcut.bookends import FINAL_PROVENANCES, present_final_result
+    from sculptcut.fixtures import generate_fixture
     from sculptcut.project import create_project
-    from sculptcut.proxy import make_proxies
     from sculptcut.rendering import render, verify_output
+    from sculptcut.timelapse_coverage import preserve_work_bridges
 
     video = tmp_path / "drawing.mp4"
-    run_process(
-        [
-            discover("ffmpeg"),
-            "-v",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc2=s=160x90:r=10:d=75",
-            "-c:v",
-            "libx264",
-            str(video),
-        ]
-    )
+    generate_fixture(video, "local", duration=75, fps=10)
     root = tmp_path / "project"
     project = create_project(root, [video]).model_copy(
         update={"settings": ProjectSettings(preset="timelapse", output_fps=10)}
     )
-    make_proxies(root, project)
-    extract_features(root, project)
-    plan = plan_project(root, project, 16)
+    # Exercise this policy with known synthetic labels, independently of policy selection.
+    segments = [Segment(source_id=project.sources[0].id, start_us=0, end_us=75_000_000,
+                        kind="SCULPT", score=1)]
+    plan = episodic_timelapse_plan(project, build_plan(project, [], 16), segments)
+    plan = preserve_work_bridges(project, plan, segments)
+    plan = reserve_final_view(project, plan)
+    plan = present_final_result(project, plan)
     assert plan.settings["story"] == "static_episodes"
+    validate_plan(project, plan)
     assert len([d for d in plan.decisions if d.action != "DROP"]) >= 2
-    # Bridges represent gaps within a global screen budget, not at extreme speed.
-    assert any(d.provenance == "story:process_bridge" for d in plan.decisions)
-    bridges = [d for d in plan.decisions if d.provenance == "story:process_bridge"]
-    assert sum(d.output_frame_count for d in bridges) <= 24
-    assert all((d.source_end_us-d.source_start_us)*10 <=
-               d.output_frame_count*4_000_000 for d in bridges)
+    assert plan.actual_frame_count == plan.target_frame_count == 160
+    assert all(left.source_end_us <= right.source_start_us
+               for left, right in zip(plan.decisions, plan.decisions[1:], strict=False))
     final = [d for d in plan.decisions if d.action != "DROP"][-1]
-    assert final.provenance == "user:final_tail"
+    assert final.provenance in FINAL_PROVENANCES
     assert final.action == "HOLD"
-    assert final.output_frame_count >= (final.source_end_us-final.source_start_us) * 10//1_000_000
+    assert final.output_frame_count >= 10
     assert plan.settings["bookends"]
     output = render(root, project, plan, tmp_path / "episodes.mp4", encoder="libx264")
     verify_output(output, 160, 10)

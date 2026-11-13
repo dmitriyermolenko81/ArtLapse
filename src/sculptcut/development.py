@@ -51,9 +51,11 @@ def development_key() -> str:
     return cache_key(DEVELOPMENT_VERSION, asdict(SETTINGS))
 
 
-def measure_development(frames: list[Gray]) -> DevelopmentEvidence:
+def measure_development(
+    frames: list[Gray], settings: DevelopmentSettings = SETTINGS,
+) -> DevelopmentEvidence:
     """Compare temporal medians only when all three views remain comparable."""
-    if len(frames) < SETTINGS.minimum_frames:
+    if len(frames) < settings.minimum_frames:
         return DevelopmentEvidence()
     groups = np.array_split(np.stack(frames), 3)
     before, middle, after = [np.median(group, axis=0).astype(np.uint8) for group in groups]
@@ -63,30 +65,30 @@ def measure_development(frames: list[Gray]) -> DevelopmentEvidence:
             brightness_histogram(left) - brightness_histogram(right)
         ).sum()) / 2
         if (
-            motion.quality < SETTINGS.minimum_tracking_quality
-            or motion.displacement > SETTINGS.maximum_displacement
-            or motion.residual > SETTINGS.maximum_residual
-            or histogram_change > SETTINGS.maximum_histogram_change
+            motion.quality < settings.minimum_tracking_quality
+            or motion.displacement > settings.maximum_displacement
+            or motion.residual > settings.maximum_residual
+            or histogram_change > settings.maximum_histogram_change
         ):
             return DevelopmentEvidence()
     first_delta = middle.astype(np.int16) - before.astype(np.int16)
     last_delta = after.astype(np.int16) - before.astype(np.int16)
-    changed = np.abs(last_delta) > SETTINGS.pixel_delta
-    if float(np.mean(changed)) > SETTINGS.maximum_changed_fraction:
+    changed = np.abs(last_delta) > settings.pixel_delta
+    if float(np.mean(changed)) > settings.maximum_changed_fraction:
         return DevelopmentEvidence()
-    persistent = changed & (np.abs(first_delta) > SETTINGS.pixel_delta) & (
+    persistent = changed & (np.abs(first_delta) > settings.pixel_delta) & (
         np.sign(first_delta) == np.sign(last_delta)
     )
     persistent = cv2.morphologyEx(
         persistent.astype(np.uint8), cv2.MORPH_OPEN,
-        np.ones((SETTINGS.persistence_kernel, SETTINGS.persistence_kernel), dtype=np.uint8),
+        np.ones((settings.persistence_kernel, settings.persistence_kernel), dtype=np.uint8),
     )
     fraction = float(np.mean(persistent.astype(np.float32)))
-    score = min(1.0, fraction / SETTINGS.full_weight_fraction)
-    if fraction < SETTINGS.minimum_persistent_fraction:
+    score = min(1.0, fraction / settings.full_weight_fraction)
+    if fraction < settings.minimum_persistent_fraction:
         score = 0.0
     state = cv2.resize(
-        after, (SETTINGS.state_width, SETTINGS.state_width), interpolation=cv2.INTER_AREA,
+        after, (settings.state_width, settings.state_width), interpolation=cv2.INTER_AREA,
     ).astype(np.uint8)
     return DevelopmentEvidence(score, state)
 

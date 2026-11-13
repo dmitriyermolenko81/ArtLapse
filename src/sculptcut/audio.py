@@ -6,6 +6,8 @@ from threading import Event
 
 from sculptcut.media import MediaError, discover, run_process
 
+DEFAULT_MUSIC_FADE_OUT_SECONDS = 5.0
+
 
 def validate_music(path: Path) -> None:
     if not path.is_file():
@@ -30,18 +32,23 @@ def validate_music(path: Path) -> None:
         raise MediaError("Music file has no audio stream")
 
 
-def music_filter(duration: float, fade_seconds: float) -> str:
+def music_filter(
+    duration: float, fade_seconds: float, *,
+    fade_out_seconds: float = DEFAULT_MUSIC_FADE_OUT_SECONDS,
+) -> str:
     """The same music timing, normalization and fades for export and inspection."""
     fade = min(fade_seconds, duration / 2)
+    fade_out = min(fade_out_seconds, duration)
     filters = (
         f"atrim=duration={duration:.9f},asetpts=PTS-STARTPTS,"
         "loudnorm=I=-16:TP=-2:LRA=11,aresample=48000,"
         f"apad,atrim=duration={duration:.9f}"
     )
     if fade > 0:
-        filters += (
-            f",afade=t=in:st=0:d={fade:.9f},afade=t=out:st={duration - fade:.9f}:d={fade:.9f}"
-        )
+        filters += f",afade=t=in:st=0:d={fade:.9f}"
+    if fade_out > 0:
+        filters += (f",afade=t=out:st={duration - fade_out:.9f}:"
+                    f"d={fade_out:.9f}:curve=hsin")
     return filters
 
 

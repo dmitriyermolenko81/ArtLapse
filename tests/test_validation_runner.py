@@ -53,6 +53,19 @@ def test_missing_executable_is_recorded_as_failure(tmp_path: Path) -> None:
     assert report["steps"][0]["status"] == "FAIL"
 
 
+def test_real_child_does_not_inherit_user_data_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_data = tmp_path / "user-data"
+    monkeypatch.setenv("ARTLAPSE_DATA_DIR", str(user_data))
+    validation = Validation(tmp_path / "isolated-check")
+    output = validation.run("data-root", [sys.executable, "-c", (
+        "from sculptcut.runtime_paths import data_directory; print(data_directory())"
+    )])
+    assert output.strip() == str(validation.workspace / "data")
+    assert not user_data.exists()
+
+
 def test_real_timeout_retains_partial_diagnostic(tmp_path: Path) -> None:
     validation = Validation(tmp_path / "timeout")
     with pytest.raises(subprocess.TimeoutExpired):

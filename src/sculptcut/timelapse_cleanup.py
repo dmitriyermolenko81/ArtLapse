@@ -24,6 +24,7 @@ from sculptcut.webcam import AnalysisCapture, analysis_media_key, webcam_roi
 
 @dataclass(frozen=True)
 class CleanupSettings:
+    highlight_static_seconds: float = 0.6
     features: int = 300
     navigation_widgets_fraction: float = 0.18
     matches: int = 12
@@ -186,8 +187,12 @@ def cleanup_ranges(
                     spans[-1] = spans[-1][0], decision.source_end_us
                 else:
                     spans.append((decision.source_start_us, decision.source_end_us))
-            key = cache_key("timelapse-cleanup-1", analysis_media_key(project, source), spans,
-                            asdict(SETTINGS), project.settings.timelapse_static_cut_seconds)
+            static_seconds = project.settings.timelapse_static_cut_seconds
+            if (plan.settings.get("work_episodes_version")
+                    and not plan.settings.get("work_process_gate")):
+                static_seconds = min(static_seconds, SETTINGS.highlight_static_seconds)
+            key = cache_key("timelapse-cleanup-261", analysis_media_key(project, source), spans,
+                            asdict(SETTINGS), static_seconds)
             cached = cache.get("timelapse_cleanup", source.id, key)
             if cached:
                 ranges.extend(IdleRange.model_validate(value) for value in cached["ranges"])
@@ -201,7 +206,7 @@ def cleanup_ranges(
             )
             fps = project.settings.proxy_fps
             step = round(1_000_000 / fps)
-            minimum_static = round(project.settings.timelapse_static_cut_seconds * 1_000_000)
+            minimum_static = round(static_seconds * 1_000_000)
             try:
                 frame_count = validated_frame_count(reader, source, fps)
                 for start, end in spans:
@@ -304,6 +309,11 @@ def clean_timelapse(
     progress: Callable[[float], None] | None = None,
 ) -> RenderPlan:
     ranges = cleanup_ranges(root, project, plan, cancel, progress)
+    if (plan.settings.get("story")=="phrased_timelapse"
+            and not plan.settings.get("work_episodes_version")):
+        # Recorded pans/zooms can establish context or reveal the result of a
+        # detail shot. Confirmed still intervals remain subject to removal.
+        ranges = [r for r in ranges if r.reason!="timelapse_camera_only"]
     if not ranges:
         return plan
     retained_us = sum(d.source_end_us - d.source_start_us for d in plan.decisions

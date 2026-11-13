@@ -133,11 +133,16 @@ def _split_decision(
                 )
             )
     ordered = sorted(boundaries)
-    duration = decision.source_end_us - decision.source_start_us
+    from sculptcut.timewarp import source_time
+
     result = []
     for left, right in zip(ordered, ordered[1:], strict=False):
-        source_start = decision.source_start_us + duration * left // count
-        source_end = decision.source_start_us + duration * right // count
+        source_start = (source_time(decision,left/count) if decision.speed_ramp else
+                        decision.source_start_us+(decision.source_end_us-decision.source_start_us)
+                        *left//count)
+        source_end = (source_time(decision,right/count) if decision.speed_ramp else
+                      decision.source_start_us+(decision.source_end_us-decision.source_start_us)
+                      *right//count)
         if source_start >= source_end:
             continue
         removed = any(
@@ -182,6 +187,18 @@ def refill_plan_after_cuts(
     for decision in [part for original in plan.decisions for part in _expand_montage(original)]:
         decisions.extend(_split_decision(decision, position, frame_cuts))
         position += decision.output_frame_count
+
+    if plan.settings.get("work_episodes_version"):
+        from sculptcut.work_episodes import refill_highlights
+
+        trimmed = plan.model_copy(update={
+            "decisions": decisions,
+            "actual_frame_count": sum(d.output_frame_count for d in decisions),
+            "settings": plan.settings | {
+                "manual_cut_seconds": sum(b - a for a, b in frame_cuts) / plan.output_fps,
+            },
+        })
+        return refill_highlights(project, trimmed)
 
     kept = [index for index, decision in enumerate(decisions) if decision.output_frame_count]
     minimum = [decisions[index].output_frame_count for index in kept]
@@ -281,6 +298,7 @@ def rebuild_after_cuts(
         snapshot_plan,
         destination,
         cancel,
+        preview=bool(snapshot_plan.settings.get("draft")),
         encoder=encoder,
         progress=progress,
         variant_project=snapshot_project,

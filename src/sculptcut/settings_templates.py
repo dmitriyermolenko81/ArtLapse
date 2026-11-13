@@ -38,11 +38,16 @@ class TemplateOptions(Model):
     music: str
     music_selection: Literal["dynamic", "full_tracks"]
     intro: str
+    intro_seconds: FiniteFloat = Field(default=2, ge=0.5, le=60)
+    intro_transition_seconds: FiniteFloat = Field(default=0.5, ge=0.1, le=3)
+    intro_position: Literal["start", "end"] = "start"
     presentation_seconds: FiniteFloat = Field(ge=0.5, le=60)
     presentation_position: Literal["start", "end"]
 
     @model_validator(mode="after")
     def valid_duration(self) -> "TemplateOptions":
+        if self.intro_transition_seconds >= self.intro_seconds:
+            raise ValueError("Intro transition must be shorter than the intro")
         if self.preset not in ("timelapse", "speed") and self.target_seconds > 300:
             raise ValueError("Shorts duration exceeds 300 seconds")
         return self

@@ -23,7 +23,7 @@ from sculptcut.output_cuts import cut_output
 from sculptcut.planning import RenderPlan, build_plan, validate_plan
 from sculptcut.project import create_project, load_project, save_project
 from sculptcut.rendering import render, verify_output
-from sculptcut.shorts_layout import MUSIC_SHORTS_PRESETS
+from sculptcut.shorts_layout import ACTIVE_PRESETS, MUSIC_SHORTS_PRESETS
 from sculptcut.ui import MainWindow
 from sculptcut.variants import read_variant
 
@@ -174,7 +174,7 @@ def test_creation_source_boundaries_do_not_slow_one_x_fragments(tmp_path: Path) 
     assert combined.plan.actual_frame_count == 268
 
 
-@pytest.mark.parametrize("preset", PRESETS)
+@pytest.mark.parametrize("preset", ACTIVE_PRESETS)
 @pytest.mark.parametrize("with_episodes", [False, True])
 def test_real_create_button_uses_unsaved_cuts_and_repeats_them(
     tmp_path: Path, preset: str, with_episodes: bool,

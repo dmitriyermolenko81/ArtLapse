@@ -14,8 +14,10 @@ from sculptcut.video_color import SDR_ENCODER_ARGS, SDR_FILTER
 
 
 def active_intro_image(settings: ProjectSettings) -> Path | None:
-    """Keep the saved image while a selected presentation takes precedence."""
-    return None if settings.presentation_video is not None else settings.intro_image
+    """Preserve legacy presentation priority only for competing opening bookends."""
+    conflict = (settings.presentation_video is not None
+                and settings.presentation_position == settings.intro_position == "start")
+    return None if conflict else settings.intro_image
 
 
 def intro_signature(settings: ProjectSettings) -> str:
@@ -27,7 +29,7 @@ def intro_signature(settings: ProjectSettings) -> str:
         raise ValueError(f"Файл заставки не найден: {image}")
     signature = ":".join(
         (
-            "intro-1",
+            "intro-1" if settings.intro_position == "start" else "intro-end-1",
             fingerprint(image),
             f"{settings.intro_seconds:.6f}",
             f"{settings.intro_transition_seconds:.6f}",
@@ -69,7 +71,7 @@ def body_frame_budget(settings: ProjectSettings, fps: int, total_seconds: float)
 def body_start_frame(settings: ProjectSettings, fps: int, body_frames: int) -> int:
     still, overlap = intro_frames(settings, fps, body_frames)
     before = presentation_frames(settings, fps) if settings.presentation_position == "start" else 0
-    return still - overlap + before
+    return (still - overlap if settings.intro_position == "start" else 0) + before
 
 
 def prepend_intro(
@@ -84,18 +86,24 @@ def prepend_intro(
     settings: ProjectSettings,
     encoder: str,
     cancel: Event | None = None,
+    overlap_body_frames: int | None = None,
 ) -> int:
-    """Prepend a fitted still and crossfade into the already normalized video."""
+    """Attach a fitted still at either end, crossfading on the normalized clock."""
     if output.exists() or output.resolve() in (video.resolve(), image.resolve()):
         raise ValueError("Intro output must be a new path")
     if not image.is_file():
         raise ValueError(f"Файл заставки не найден: {image}")
-    still, overlap = intro_frames(settings, fps, body_frames)
+    still, overlap = intro_frames(settings, fps, (body_frames if overlap_body_frames is None
+                                               else overlap_body_frames))
     if not still:
         raise ValueError("Intro image is not configured")
     expected = body_frames + still - overlap
     fade = overlap / fps
     offset = (still - overlap) / fps
+    inputs = "[intro][body]"
+    if settings.intro_position == "end":
+        offset = (body_frames - overlap) / fps
+        inputs = "[body][intro]"
     quality = (
         ["-preset", "p4", "-rc", "vbr", "-cq", "18", "-b:v", "0"]
         if encoder == "h264_nvenc"
@@ -122,7 +130,7 @@ def prepend_intro(
             f"{cover}"
             f"setsar=1,fps={fps},trim=end_frame={still},settb=1/{fps},"
             "setpts=N,format=yuv420p[intro];"
-            f"[intro][body]xfade=transition=fade:duration={fade:.9f}:offset={offset:.9f},"
+            f"{inputs}xfade=transition=fade:duration={fade:.9f}:offset={offset:.9f},"
             f"fps={fps},settb=1/{fps},setpts=N,{SDR_FILTER}[out]",
             encoding="utf-8",
         )

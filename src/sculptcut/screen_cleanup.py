@@ -14,6 +14,8 @@ from sculptcut.domain import Model, Project
 from sculptcut.idle import IdleRange
 from sculptcut.image_statistics import median_uint8
 from sculptcut.media import Cancelled, MediaError
+from sculptcut.overlay_guard import SETTINGS as OVERLAYS
+from sculptcut.overlay_guard import notification_overlay
 from sculptcut.planning import RenderPlan, validate_plan
 from sculptcut.project import cache_key, cache_session
 from sculptcut.proxy import proxy_path, validated_frame_count
@@ -40,6 +42,8 @@ def screen_kind(gray: Gray, settings: ScreenSettings = DEFAULT_SCREENS) -> str |
 
 
 def _screen_kind(gray: Gray, settings: ScreenSettings) -> str | None:
+    if notification_overlay(gray):
+        return "notification_overlay"
     h, w = gray.shape
     center = gray[h // 8 : h * 7 // 8, w // 8 : w * 7 // 8]
     if float(np.mean(center <= settings.black)) >= settings.blank_fraction:
@@ -127,11 +131,12 @@ def project_screens(
                         window_end = min(span_end, window_start + window_size)
                         window_id = f"{source.id}:{window_start}:{window_end}"
                         key = cache_key(
-                            "screens-4",
+                            "screens-264-overlays-whole-episode",
                             analysis_media_key(project, source),
                             window_start,
                             window_end,
                             DEFAULT_SCREENS.model_dump(),
+                            str(OVERLAYS),
                         )
                         cached = cache.get("screen_window", window_id, key)
                         if cached is not None:
@@ -160,11 +165,21 @@ def project_screens(
                                     cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.uint8)
                                 )
                                 if kind:
-                                    start = max(0, time_us - step)
-                                    end = min(source.duration_us, time_us + 2 * step)
+                                    padding = (round(OVERLAYS.padding_seconds*1e6)
+                                               if kind == "notification_overlay" else step)
+                                    start = max(0, time_us - padding)
+                                    end = min(source.duration_us, time_us + max(2*step, padding))
+                                    if kind == "notification_overlay" and plan is not None:
+                                        for decision in plan.decisions:
+                                            if (decision.source_id == source.id
+                                                    and decision.output_frame_count
+                                                    and decision.source_start_us <= time_us
+                                                    < decision.source_end_us):
+                                                start = min(start, decision.source_start_us)
+                                                end = max(end, decision.source_end_us)
                                     if window_ranges and window_ranges[-1].end_us >= start:
                                         window_ranges[-1] = window_ranges[-1].model_copy(
-                                            update={"end_us": end}
+                                            update={"end_us": max(end, window_ranges[-1].end_us)}
                                         )
                                     else:
                                         window_ranges.append(

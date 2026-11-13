@@ -232,7 +232,7 @@ def test_square_real_export_and_preview(tmp_path: Path, preset: str) -> None:
         )
         verify_output(output, 30, 30)
         info = probe(output)
-        assert (info.width, info.height) == ((360, 640) if preview else (1080, 1920))
+        assert (info.width, info.height) == (1080, 1920)
         run_process(
             [discover("ffmpeg"), "-v", "error", "-xerror", "-i", str(output), "-f", "null", "-"]
         )

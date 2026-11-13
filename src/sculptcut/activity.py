@@ -1,16 +1,16 @@
 """Explainable rule-based activity scores, never calibrated probabilities."""
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from threading import Event
 from typing import Literal
 
 from sculptcut.analysis import FrameFeature, analysis_key, read_features
-from sculptcut.domain import Model, Project
+from sculptcut.domain import Model, Project, SourceMedia
 from sculptcut.idle import DEFAULT_IDLE, quiet
 from sculptcut.media import Cancelled
 from sculptcut.motion import Motion, analyze_motion
-from sculptcut.project import cache_key, database
+from sculptcut.project import cache_get, cache_key, database
 
 Kind = Literal[
     "STATIC", "CAMERA", "SCULPT", "INTERFACE", "MIXED", "PROCESSING", "FINAL_VIEW", "UNKNOWN"
@@ -27,9 +27,15 @@ class ActivitySettings:
     stable_signed_change: float = 0.001
     stable_hash_step_bits: int = 2
     stable_hash_run_bits: int = 8
+    stable_changed_pixel_fraction: float = 0.001
 
 
 SETTINGS = ActivitySettings()
+ACTIVITY_VERSION = "activity-4-local-detail-guard"
+
+
+def activity_key(project: Project, source: SourceMedia) -> str:
+    return cache_key(ACTIVITY_VERSION, asdict(SETTINGS), analysis_key(project, source))
 
 
 class Activity(Model):
@@ -87,7 +93,11 @@ def classify(
         )
     elif quiet(feature, DEFAULT_IDLE, False):
         kind, score, explanation = "STATIC", 0.9, "Low observed canvas change"
-    elif perceptually_static:
+    elif (perceptually_static
+          and feature.changed_pixel_ratio <= SETTINGS.stable_changed_pixel_fraction):
+        # A coarse whole-canvas hash can stay stable while a small detail is
+        # edited. Above the cursor-sized allowance, use local/motion evidence
+        # below instead of overriding it with a STATIC label.
         kind, score, explanation = (
             "STATIC",
             0.8,
@@ -155,7 +165,31 @@ def _stable_view(
     return True, stable_anchor
 
 
+def activity_ready(root: Path, project: Project, source: SourceMedia) -> bool:
+    feature_key = analysis_key(project, source)
+    if cache_get(root, 'features', source.id, feature_key) is None:
+        return False
+    connection = database(root)
+    try:
+        if not connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='activity'").fetchone():
+            return False
+        missing = connection.execute(
+            'SELECT 1 FROM features f LEFT JOIN activity a ON a.source_id=f.source_id '
+            'AND a.timestamp=f.timestamp AND a.key=? WHERE f.source_id=? AND f.key=? '
+            'AND a.timestamp IS NULL LIMIT 1',
+            (activity_key(project, source), source.id, feature_key)).fetchone()
+        return missing is None
+    finally:
+        connection.close()
+
+
 def classify_project(root: Path, project: Project, cancel: Event | None = None) -> None:
+    if cancel and cancel.is_set():
+        raise Cancelled('Classification cancelled')
+    pending = [source for source in project.sources if not activity_ready(root, project, source)]
+    if not pending:
+        return
     analyze_motion(root, project, cancel)
     connection = database(root)
     try:
@@ -164,8 +198,8 @@ def classify_project(root: Path, project: Project, cancel: Event | None = None) 
             "(source_id TEXT,key TEXT,timestamp INTEGER,value TEXT,"
             "PRIMARY KEY(source_id,key,timestamp))"
         )
-        for source in project.sources:
-            key = cache_key("activity-3-perceptual-stability", analysis_key(project, source))
+        for source in pending:
+            key = activity_key(project, source)
             motion_key = cache_key("motion-2", analysis_key(project, source))
             previous_feature: FrameFeature | None = None
             stable_anchor_hash: int | None = None

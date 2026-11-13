@@ -34,6 +34,7 @@ def edit_episode(project: Project, decision: RenderDecision, speed: float | None
             end_us=end,
             action="DROP" if speed is None else "SET_SPEED",
             speed=1 if speed is None else speed,
+            restore_omitted=speed is not None and decision.action == "DROP",
         )
     )
     return Project.model_validate(project.model_dump() | {"overrides": edits})
@@ -113,7 +114,7 @@ class EpisodeEditor(QListWidget):
             if self.context_settings is not None:
                 project = project.model_copy(update={"settings": self.context_settings})
             try:
-                self.plan = apply_episode_edits(project, self.plan)
+                self.plan = apply_episode_edits(project, self.plan, root=root)
             except ValueError as exc:
                 if str(exc) != "Overrides drop all footage":
                     raise
@@ -140,9 +141,12 @@ class EpisodeEditor(QListWidget):
                         )
                     )
                     and d.action not in ("HOLD", "MONTAGE")
+                    and d.action == decisions[-1].action
                     and decisions[-1].action not in ("HOLD", "MONTAGE")
                     and d.crop == decisions[-1].crop
                     and d.subject_camera == decisions[-1].subject_camera
+                    and d.speed_ramp is None and decisions[-1].speed_ramp is None
+                    and d.episode_id == decisions[-1].episode_id
                     and d.source_id == decisions[-1].source_id
                     and (d.provenance == "user:shorts_manual_cut") == (
                         decisions[-1].provenance == "user:shorts_manual_cut"
@@ -264,6 +268,6 @@ class EpisodeEditor(QListWidget):
         if self.validate_edits and self.plan is not None:
             checked = (after.model_copy(update={"settings": self.context_settings})
                        if self.context_settings is not None else after)
-            apply_episode_edits(checked, self.plan)
+            apply_episode_edits(checked, self.plan, root=self.root)
         save_project(self.root, after)
         self.edit_saved.emit(before, after, label)

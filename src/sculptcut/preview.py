@@ -135,9 +135,12 @@ def render_preview(
                         raise Cancelled("Preview cancelled")
                     target = decision.source_start_us
                     if decision.action != "HOLD":
-                        target += (
-                            (decision.source_end_us - target) * index // decision.output_frame_count
-                        )
+                        from sculptcut.timewarp import source_time
+
+                        target = (source_time(decision,(index+.5)/decision.output_frame_count)
+                                  if decision.speed_ramp else decision.source_start_us+
+                                  (decision.source_end_us-decision.source_start_us)*index
+                                  //decision.output_frame_count)
                     while next_us is not None and next_us <= target:
                         if cancel and cancel.is_set():
                             raise Cancelled("Preview cancelled")

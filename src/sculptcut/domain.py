@@ -131,7 +131,8 @@ class ProjectSettings(Model):
     presentation_seconds: float = Field(default=5, ge=0.5, le=60)
     presentation_position: Literal["start", "end"] = "start"
     presentation_source_index: int = Field(default=0, ge=0)
-    intro_seconds: float = Field(default=2, ge=0.5, le=10)
+    intro_position: Literal["start", "end"] = "start"
+    intro_seconds: float = Field(default=2, ge=0.5, le=60)
     intro_transition_seconds: float = Field(default=0.5, ge=0.1, le=3)
     crop_mode: Literal["full", "canvas", "hybrid", "viewport"] = "full"
     timelapse_viewport_roi: Roi = Field(
@@ -185,12 +186,26 @@ class ProjectSettings(Model):
         return self
 
 
+class SpeedRamp(Model):
+    start_us: int = Field(ge=0)
+    end_us: int = Field(gt=0)
+    strength: float = Field(ge=0,le=.85)
+
+    @model_validator(mode="after")
+    def valid_bounds(self) -> "SpeedRamp":
+        if self.end_us<=self.start_us:
+            raise ValueError("Speed ramp must have positive source duration")
+        return self
+
+
 class Override(Model):
     source_id: str
     start_us: int = Field(ge=0)
     end_us: int = Field(gt=0)
     action: Literal["KEEP", "RETAIN", "DROP", "SET_SPEED", "LOCK_SEGMENT", "FORCE_MONTAGE"]
     speed: float = Field(default=1, ge=1)
+    restore_omitted: bool = False
+    exact_selection: bool = False  # User marked precise source bounds; do not search inside.
 
 
 class Project(Model):
@@ -199,6 +214,7 @@ class Project(Model):
     rois: dict[str, Roi] = Field(default_factory=dict)
     settings: ProjectSettings = Field(default_factory=ProjectSettings)
     overrides: list[Override] = Field(default_factory=list)
+    source_splits: dict[str, list[int]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def timeline(self) -> "Project":
@@ -212,6 +228,10 @@ class Project(Model):
         if not set(self.rois).issubset(ids):
             raise ValueError("ROI references an unknown source")
         durations = {s.id: s.duration_us for s in self.sources}
+        for sid, points in self.source_splits.items():
+            if sid not in durations or points != sorted(set(points)) or any(
+                    not 0 < t < durations[sid] for t in points):
+                raise ValueError('Invalid shared source split')
         ends: dict[str, int] = {}
         for override in sorted(self.overrides, key=lambda o: (o.source_id, o.start_us)):
             if not (

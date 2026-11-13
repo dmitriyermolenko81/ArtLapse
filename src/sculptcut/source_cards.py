@@ -43,7 +43,7 @@ from sculptcut.ui_icons import ui_icon
 
 META_ROLE = Qt.ItemDataRole.UserRole + 1
 PRESENTATION_ROLE = Qt.ItemDataRole.UserRole + 2
-VIDEO_SUFFIXES = {".mp4", ".mkv", ".mov", ".webm"}
+VIDEO_SUFFIXES = {".mp4", ".mkv", ".mov", ".webm", ".avi", ".mpg", ".mpeg"}
 
 
 def dropped_video_paths(urls: list[QUrl]) -> list[Path]:
@@ -78,7 +78,7 @@ class VideoDropZone(QFrame):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setWordWrap(True)
         layout.addWidget(title)
-        hint = QLabel(tr("MP4, MKV, MOV или WebM · файлы остаются на вашем диске"))
+        hint = QLabel(tr("MP4, MKV, MOV, WebM, AVI, MPG · файлы остаются на вашем диске"))
         hint.setObjectName("dropHint")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setWordWrap(True)

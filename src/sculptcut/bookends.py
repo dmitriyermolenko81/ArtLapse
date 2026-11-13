@@ -39,6 +39,27 @@ def present_final_result(project: Project, plan: RenderPlan) -> RenderPlan:
         if plan.decisions[i].provenance not in FINAL_PROVENANCES:
             break
         existing += plan.decisions[i].output_frame_count
+    if plan.settings.get("work_episodes_version") and not existing and desired > 0:
+        source = next(s for s in project.sources if s.id == last.source_id)
+        frame_us = (1_000_000 * source.fps_den + source.fps_num - 1) // source.fps_num
+        cut = last.source_end_us - frame_us
+        if last.output_frame_count > 1 and last.source_start_us < cut:
+            body_count = min(last.output_frame_count - 1, max(1,
+                (cut - last.source_start_us) * plan.output_fps // 1_000_000))
+            # A short final action is still work. Reserve a separate still from
+            # its final frame instead of replacing the entire action with HOLD.
+            body = last.model_copy(update={
+                "source_end_us": cut, "output_frame_count": body_count,
+                "speed_ramp": None,
+            })
+            tail = last.model_copy(update={
+                "source_start_us": cut, "output_frame_count": last.output_frame_count-body_count,
+                "action": "HOLD",
+                "provenance": "user:final_tail", "episode_id": None,
+                "episode_score": None, "speed_ramp": None,
+            })
+            decisions[index:index + 1] = [body, tail]
+            return present_final_result(project, plan.model_copy(update={"decisions": decisions}))
     if existing >= desired and existing > 0:
         return plan.model_copy(update={"settings": plan.settings | {
             "bookends": True, "final_view_frames": existing,
@@ -144,17 +165,16 @@ def final_frames(plan: RenderPlan) -> int:
 
 
 def bookend_filter(total: int, tail: int, fps: int, width: int, height: int) -> str:
-    body_end = total - tail
-    zoom = (
-        f"zoompan=z='1+{FINAL_ZOOM}*on/{max(1, tail - 1)}':"
-        f"x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s={width}x{height}:fps={fps}"
-    )
-    if body_end <= 0:
-        return zoom
+    body_end = max(0, total - tail)
+    phase = f"clip((in-{body_end})/{max(1, tail - 1)},0,1)"
+    ease = f"pow({phase},3)*(10-15*({phase})+6*pow({phase},2))"
+    zoom = f"(1+{FINAL_ZOOM}*({ease}))"
+    x = f"W*(1-1/{zoom})/2"
+    y = f"H*(1-1/{zoom})/2"
+    # zoompan rounds its crop to integer pixels. Fractional source corners
+    # interpolate smoothly without an oversized intermediate or queued branches.
     return (
-        f"split=2[work][final];"
-        f"[work]trim=end_frame={body_end},settb=1/{fps},setpts=N[w];"
-        f"[final]trim=start_frame={body_end}:end_frame={total},"
-        f"settb=1/{fps},setpts=PTS-STARTPTS,{zoom},settb=1/{fps},setpts=N[f];"
-        f"[w][f]concat=n=2:v=1:a=0,settb=1/{fps},setpts=N"
+        f"perspective=x0='{x}':y0='{y}':x1='W-({x})':y1='{y}':"
+        f"x2='{x}':y2='H-({y})':x3='W-({x})':y3='H-({y})':"
+        f"sense=source:eval=frame:interpolation=cubic:enable='gte(n,{body_end})'"
     )

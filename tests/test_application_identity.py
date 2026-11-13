@@ -38,6 +38,7 @@ raise SystemExit(main())
 """
     env = os.environ.copy()
     env["SCULPTCUT_DATA_DIR"] = str(tmp_path / "startup-data")
+    env["ARTLAPSE_DATA_DIR"] = str(tmp_path / "startup-data")
     result = subprocess.run(
         [sys.executable, "-c", script], env=env, capture_output=True, timeout=30,
     )

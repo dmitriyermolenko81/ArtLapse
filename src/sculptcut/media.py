@@ -7,8 +7,9 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import Counter
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 from threading import Event
@@ -242,8 +243,7 @@ def parse_probe(data: str, path: Path) -> MediaInfo:
 def probe(path: Path, cancel: Event | None = None) -> MediaInfo:
     if not path.is_file():
         raise MediaError(f"Source does not exist: {path}")
-    return parse_probe(
-        run_process(
+    data = run_process(
             [
                 discover("ffprobe"),
                 "-v",
@@ -253,10 +253,29 @@ def probe(path: Path, cancel: Event | None = None) -> MediaInfo:
                 "-of",
                 "json",
                 str(path.resolve()),
-            ], cancel
-        ),
-        path,
-    )
+            ], cancel)
+    info = parse_probe(data, path)
+    if json.loads(data).get('format', {}).get('format_name') == 'mpegvideo':
+        # ZBrush writes elementary MPEG with an estimated byte-rate duration
+        # and a demuxer-default average FPS. Read real decoded frame durations
+        # and count frames, without retaining the movie or all frame metadata.
+        common = [discover('ffprobe'), '-v', 'error', '-select_streams', str(info.stream_index)]
+        sample = json.loads(run_process([*common, '-read_intervals', '%+#32', '-show_frames',
+            '-show_entries', 'frame=duration,pkt_duration', '-of', 'json', str(path.resolve())],
+            cancel))
+        periods = Counter(int(f.get('duration', f.get('pkt_duration', 0)))
+                          for f in sample.get('frames', [])
+                          if int(f.get('duration', f.get('pkt_duration', 0))) > 0)
+        counted = json.loads(run_process([*common, '-count_frames', '-show_entries',
+            'stream=nb_read_frames', '-of', 'json', str(path.resolve())], cancel))
+        frames = int(counted['streams'][0].get('nb_read_frames', 0))
+        if not periods or frames <= 0:
+            raise MediaError('Не удалось определить длительность MPEG-видео')
+        period = periods.most_common(1)[0][0] * Fraction(info.time_base)
+        fps = 1 / period
+        info = replace(info, duration_us=round(frames * period * 1_000_000),
+                       fps_num=fps.numerator, fps_den=fps.denominator)
+    return info
 
 
 def doctor() -> dict[str, object]:

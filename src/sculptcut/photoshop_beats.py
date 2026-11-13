@@ -15,12 +15,14 @@ from sculptcut.domain import CameraPoint, Project, Roi, SourceMedia, SubjectCame
 from sculptcut.media import Cancelled, MediaError
 from sculptcut.photoshop import SETTINGS as DRAWING_SETTINGS
 from sculptcut.photoshop import centered_still_cameras, drawing_and_canvas_box, drawing_viewport
-from sculptcut.photoshop_stability import score_source_window
+from sculptcut.photoshop_stability import DrawingViews, score_source_window
 from sculptcut.planning import RenderDecision, RenderPlan, validate_plan
 from sculptcut.roi import pixel_bounds
+from sculptcut.short_catalogue import catalogue_score
 from sculptcut.shorts_layout import apply_square_layout, uses_square
 from sculptcut.square_tracking import safe_viewport
 from sculptcut.subject_camera import still_frame
+from sculptcut.visual_transitions import choose_distinct_view, unlocked_window
 from sculptcut.webcam import webcam_roi, without_webcam
 
 
@@ -59,17 +61,23 @@ def photoshop_beat_plan(
     samples: dict[str, list[tuple[int, Roi | None]]] = {}
     canvases: dict[str, list[Roi]] = {}
     backdrops: dict[tuple[str, int], tuple[Roi | None, tuple[int, int, int]]] = {}
-    with tempfile.TemporaryDirectory(prefix="photoshop-beats-", dir=root) as directory:
+    previous_view: NDArray[np.uint8] | None = None
+    with (tempfile.TemporaryDirectory(prefix="photoshop-beats-", dir=root) as directory,
+          DrawingViews(project, cancel) as views):
         frame_path = Path(directory) / "sample.png"
         for slot in range(slots):
             if cancel and cancel.is_set():
                 raise Cancelled("Photoshop music planning cancelled")
             options: list[tuple[float, int, str, int]] = []
             left, right = total * slot // slots, total * (slot + 1) // slots
-            for candidate in range(SETTINGS.candidates_per_slot):
-                position = left + (right - left) * (2 * candidate + 1) // (
-                    2 * SETTINGS.candidates_per_slot
-                )
+            available = [(max(left, a), min(right, b)) for a, b, _ in spans
+                         if a < right and b > left]
+            positions = [(a+b)//2 for a, b in available]
+            if (not base.settings.get("complete_short_catalogue")
+                or base.settings.get("short_catalogue_fallback")):
+                positions = [left + (right-left)*(2*candidate+1)//(2*SETTINGS.candidates_per_slot)
+                             for candidate in range(SETTINGS.candidates_per_slot)]
+            for position in positions:
                 if slot == slots - 1:
                     position = total - 1
                 start, end, span = next(
@@ -85,14 +93,29 @@ def photoshop_beat_plan(
                     span.source_start_us + position - start,
                     max(span.source_start_us, span.source_end_us - frame_us),
                 )
-                score = score_source_window(
+                score = catalogue_score(base, source.id, window_start, window_start+window) if (
+                    base.settings.get("complete_short_catalogue")
+                    and not base.settings.get("short_catalogue_fallback")) else score_source_window(
                     root, source, window_start, window_start + window, cancel,
                     webcam_roi(project.settings, source.id),
                 )
                 options.append((score, abs(position - (left + right) // 2), source.id, timestamp))
                 if slot == slots - 1:
                     break
-            _, _, source_id, timestamp = min(options)
+            preferred = min(range(len(options)), key=lambda i: options[i])
+            baseline = options[preferred]
+            if unlocked_window(project, baseline[2], baseline[3], baseline[3] + 1):
+                def signature(i: int, rows: list[tuple[float, int, str, int]] = options
+                              ) -> NDArray[np.uint8] | None:
+                    return views.signature(sources[rows[i][2]], rows[i][3])
+
+                def eligible(i: int, rows: list[tuple[float, int, str, int]] = options) -> bool:
+                    row = rows[i]
+                    return unlocked_window(project, row[2], row[3], row[3] + 1)
+
+                preferred = choose_distinct_view([1 / (1 + max(0, row[0])) for row in options],
+                                                 signature, previous_view, preferred, eligible)
+            _, _, source_id, timestamp = options[preferred]
             # Short partitions can share the same stability window. Keep source
             # intervals strictly ordered without inventing extra source footage.
             if chosen and chosen[-1][0] == source_id:
@@ -123,6 +146,7 @@ def photoshop_beat_plan(
             if canvas is not None:
                 canvases.setdefault(source_id, []).append(canvas)
             chosen.append((source_id, timestamp, boundaries[slot + 1] - boundaries[slot]))
+            previous_view = views.signature(source, timestamp)
             if progress:
                 progress(0.35 + 0.65 * (slot + 1) / slots)
 

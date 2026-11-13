@@ -21,7 +21,7 @@ def read_variant(video: Path) -> dict[str, Any]:
     data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or data.get("schema_version") != 1:
         raise ValueError("Неизвестная версия истории ролика")
-    for field in ("project", "plan", "music", "episode_base_plan"):
+    for field in ("project", "plan", "music", "episode_base_plan", "episode_catalogue"):
         if data.get(field) is not None and not isinstance(data[field], dict):
             raise ValueError(f"Повреждённая история ролика: {field}")
     if data.get("parent") is not None and not isinstance(data["parent"], str):
@@ -73,7 +73,9 @@ def cut_history(video: Path) -> list[list[tuple[int, int]]]:
             ):
                 raise ValueError("Повреждённая история ролика: cut_history_us")
             return [[(a, b) for a, b in batch] for batch in raw] + list(reversed(chain))
-        if state.get("operation") in ("shorts_refill", "duration_refill", "combined_edit"):
+        if state.get("operation") in (
+                "shorts_refill", "duration_refill", "combined_edit", "episode_roll",
+                "source_selection"):
             return list(reversed(chain))
         if state.get("cuts_us"):
             chain.append([(a, b) for a, b in state["cuts_us"]])
@@ -95,7 +97,8 @@ def has_manual_edits(video: Path) -> bool:
     return bool(
         cut_history(video) or state.get("bookend_cuts_us")
         or state.get("episode_base_plan")
-        or state.get("operation") in ("combined_edit", "shorts_refill", "duration_refill")
+        or state.get("operation") in (
+            "combined_edit", "shorts_refill", "duration_refill", "episode_roll", "source_selection")
         or any(d.get("provenance") in ("user:shorts_manual_cut", "user:shorts_partial_cut")
                for d in (state.get("plan") or {}).get("decisions", []))
     )
@@ -113,6 +116,7 @@ def save_variant(
     history: list[list[tuple[int, int]]] | None = None,
     bookend_cuts: list[tuple[int, int]] | None = None,
     episode_base_plan: RenderPlan | None = None,
+    episode_catalogue: dict[str, Any] | None = None,
 ) -> None:
     snapshot = metadata_path(video, ".variant.json")
     if snapshot.exists() or video.with_suffix(".variant.json").exists():
@@ -133,7 +137,8 @@ def save_variant(
         }
     if history is None:
         history = cut_history(parent) if parent else []
-        if operation in ("shorts_refill", "duration_refill", "combined_edit"):
+        if operation in ("shorts_refill", "duration_refill", "combined_edit", "episode_roll",
+                "source_selection"):
             history = []  # This plan already incorporates cuts and refills its duration.
         elif cuts:
             history.append(cuts)
@@ -157,4 +162,8 @@ def save_variant(
         state["episode_base_plan"] = episode_base_plan.model_dump(mode="json")
     elif operation in ("cut", "music", "intro") and inherited.get("episode_base_plan"):
         state["episode_base_plan"] = inherited["episode_base_plan"]
+    if episode_catalogue is not None:
+        state["episode_catalogue"] = episode_catalogue
+    elif inherited.get("episode_catalogue"):
+        state["episode_catalogue"] = inherited["episode_catalogue"]
     atomic_write(snapshot, json.dumps(state, ensure_ascii=False, indent=2))

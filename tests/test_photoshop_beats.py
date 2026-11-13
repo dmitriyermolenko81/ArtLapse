@@ -92,7 +92,7 @@ def test_photoshop_music_stills_keep_one_camera_in_real_export_and_preview(
         verify_output(output, 180, 30, expected_audio=True)
         metadata = probe(output)
         assert metadata.audio_streams
-        assert (metadata.width, metadata.height) == ((360, 640) if preview else (1080, 1920))
+        assert (metadata.width, metadata.height) == (1080, 1920)
         reader = cv2.VideoCapture(str(output))
         marker_centers = []
         count = 0

@@ -1,7 +1,8 @@
 """Retain continuous Shorts episodes and time their cuts against the soundtrack."""
 
+import json
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from threading import Event
 
@@ -165,10 +166,15 @@ def describe_sync(project: Project, plan: RenderPlan, beats: dict[int, float]) -
 def retime_episodes(
     project: Project, plan: RenderPlan, events: list[MusicEvent],
     music_offset: float = 0.0, cancel: Event | None = None,
+    *, preserve_source_windows: bool = False,
 ) -> RenderPlan:
     """Fit the music grid first; preserve manual speed locks when exact fitting fails."""
     if cancel and cancel.is_set():
         raise Cancelled("Music episode planning cancelled")
+    plan = plan.model_copy(update={"settings": plan.settings | {
+        "episode_music_events": json.dumps([asdict(event) for event in events]),
+        "episode_music_offset": music_offset,
+    }})
     active = [i for i, d in enumerate(plan.decisions) if d.output_frame_count]
     fps = plan.output_fps
     beats: dict[int, float] = {}
@@ -179,7 +185,7 @@ def retime_episodes(
     if not beats or len(active) < 2:
         return describe_sync(project, plan, beats)
     grid = episode_grid(project, plan.actual_frame_count, events, music_offset)
-    fitted = fit_episode_grid(project, plan, grid) if grid else None
+    fitted = fit_episode_grid(project, plan, grid) if grid and not preserve_source_windows else None
     if fitted is not None:
         return describe_sync(project, fitted, beats)
     originals = [plan.decisions[i].output_frame_count for i in active]

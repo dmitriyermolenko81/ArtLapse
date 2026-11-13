@@ -216,7 +216,7 @@ def test_real_toolbar_apply_all_modes_and_save_selected_options(
         wait_job(owner)
         assert not owner.last_error, owner.last_error
         settings = load_project(root).settings
-        assert settings.preset == preset and settings.target_seconds == 3
+        assert settings.preset == expected.preset and settings.target_seconds == 3
         assert settings.music_path == music and settings.intro_image == intro
         assert settings.music_selection_mode == "full_tracks"
         assert settings.shorts_layout == "square"

@@ -77,14 +77,15 @@ def test_attacks_follow_real_tempo_changes_to_one_output_frame(
 def test_mode_counts_beats_despite_jitter_and_changing_tempo() -> None:
     times = np.r_[np.arange(0.3, 6, 0.71), np.arange(6.4, 12, 0.41)]
     times += np.where(np.arange(len(times)) % 2, 0.012, -0.012)
-    analysis = MusicAnalysis(100, tuple(MusicEvent(float(t), 0.9) for t in times), ())
+    # Neutral activity isolates beat counting from adaptive energetic cut density.
+    analysis = MusicAnalysis(100, tuple(MusicEvent(float(t), 0.65) for t in times), ())
     for mode, step in (("slow", 4), ("normal", 2), ("fast", 1)):
         selected = select_cut_beats(analysis, mode, 0.3, 10)
         assert [event.time_seconds for event in selected] == list(times[::step])
 
 
 def test_irregular_connected_foreground_does_not_hijack_pulse() -> None:
-    beats = tuple(MusicEvent(float(t), 0.9) for t in np.arange(0.5, 8, 0.5))
+    beats = tuple(MusicEvent(float(t), 0.65) for t in np.arange(0.5, 8, 0.5))
     irregular = tuple(MusicEvent(t, 1.0) for t in (2.08, 2.27, 2.76, 3.09))
     selected = select_cut_beats(MusicAnalysis(120, beats, irregular))
     assert [event.time_seconds for event in selected] == [

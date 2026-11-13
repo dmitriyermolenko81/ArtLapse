@@ -89,7 +89,8 @@ def build_music_wave(root: Path, settings: ProjectSettings, plan: RenderPlan,
     if music is None:
         return None
     stat = music.stat()
-    key = cache_key("music-wave-1", str(music.resolve()), stat.st_size, stat.st_mtime_ns,
+    key = cache_key("music-wave-2-five-second-outro", str(music.resolve()),
+                    stat.st_size, stat.st_mtime_ns,
                     duration, settings.music_loop, settings.music_fade_seconds, SETTINGS.__dict__)
     directory = root / "cache" / "music-wave"
     directory.mkdir(parents=True, exist_ok=True)

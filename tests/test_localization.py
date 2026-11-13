@@ -30,14 +30,14 @@ def test_russian_ui_preserves_machine_values_and_qt_dialogs() -> None:
         assert window.locale().name() == "ru_RU"
         assert QCoreApplication.translate("QPlatformTheme", "Cancel") == "Отмена"
         assert set(window.findChildren(QComboBox)) == {
-            window.variants,
+            window.variants, window.trim_mode,
         }
+        assert not window.trim_mode.isVisible()
         assert window.shorts_layout.buttons["square"].toolTip() == "Квадрат 1:1 с полями"
         assert window.shorts_layout.findData("square") == 1
         assert window.variants.placeholderText() == "Выберите готовый ролик"
-        assert "Применить" in buttons
-        assert any(w.accessibleName() == "Применить настройки выбранной версии"
-                   for w in window.findChildren(QPushButton))
+        assert not any(w.accessibleName() == "Применить настройки выбранной версии"
+                       for w in window.findChildren(QPushButton))
         assert not window.versions_panel.isVisible()
         window.target.setValue(7.5)
         window.preset.setCurrentIndex(window.preset.findData("shorts"))

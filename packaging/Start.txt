@@ -1,239 +1,49 @@
-﻿ArtLapse 0.1.2 — первый запуск
+﻿ArtLapse 0.1.3 — первый запуск / First run
 
-1. Сохраните всю папку программы в удобном месте, доступном для записи.
-   Если программа получена в архиве, сначала распакуйте его целиком.
-2. Запустите ArtLapse.exe. Установка и права администратора не нужны.
-3. Нажмите «+», создайте проект и добавьте исходные видео.
-4. Выберите режим, длительность, музыку и нажмите «Создать ролик».
-   Готовое видео сохраняется в папке renders выбранного проекта.
-
-Версия программы показана рядом с ArtLapse и в заголовке окна.
-Кнопка RU / EN справа вверху переключает язык интерфейса.
-Python, FFmpeg и необходимые библиотеки уже включены в программу.
-Интернет для монтажа и экспорта не нужен. Исходные видео не изменяются.
-
-КРАТКО О РЕЖИМАХ
-
-Раздел TIMELAPSE:
-- Эпизоды — сокращает найденные паузы и собирает основные этапы работы.
-- Ускорение — ускоряет всю запись без автоматических вырезок.
-
-Раздел SHORTS:
-- 9:16 — короткий вертикальный монтаж из эпизодов 3D-скульптинга.
-- Эпизоды (под музыку) — движущиеся видеоэпизоды сменяются
-  под музыкальные акценты; работа внутри эпизода продолжается.
-- Музыка (кадры) — отдельные стоп-кадры сменяются в ритме музыки.
-- Ps 9:16 — вертикальный монтаж процесса рисования с кадрированием холста.
-- Ps эпизоды — движущиеся отрывки рисования сменяются под музыку.
-- Ps музыка — стадии рисунка показываются стоп-кадрами под музыку.
-
-Для Shorts также доступен квадрат 1:1 с полями в вертикальном видео.
-
-РАБОТА С ПРОЕКТОМ
-
-Сначала создайте проект кнопкой «+» в верхней панели. Добавьте записи слева
-через «Добавить видео». Поддерживаются MP4, MKV и MOV. Открыть существующий
-проект можно кнопкой папки вверху; рядом находится список недавних проектов.
-«Сохранить» сохраняет проект и его настройки; «Создать ролик» запускает экспорт.
-Исходные записи должны оставаться доступны по своим путям.
-
-Справа выберите режим и длительность результата. Часы, минуты и секунды
-меняются колесом; щелчок по числу включает ручной ввод. Введите имя файла
-внизу и нажмите «Создать ролик». Анализ и экспорт могут занять время,
-особенно для многочасовых записей. Долгую задачу можно отменить.
-Готовые файлы находятся в папке renders вашего проекта. «Открыть готовые
-видео» открывает папку результатов, список «Версия» переключает варианты.
-
-КАДР, МУЗЫКА, ЗАСТАВКА
-
-Выберите весь кадр или задайте рамку вокруг нужной области. Для Shorts
-доступны вертикальная и квадратная компоновки. Проверьте рамку в предпросмотре.
-Укажите свою музыку в разделе «Звук»; кнопка с нотой открывает выбор музыки.
-Музыкальные режимы используют найденные акценты для смены эпизодов или кадров.
-Картинка-заставка и презентационный клип входят в длительность результата.
-Если выбрана презентация, картинка-заставка не участвует.
-Очень короткий Photoshop-ролик может оказаться длиннее заданного времени,
-чтобы сохранить читаемую завершающую часть.
-
-ЭПИЗОДЫ И ПОДРЕЗКА
-
-«Эпизоды монтажа» открывает найденные отрывки с предпросмотром и шкалой.
-Первый эпизод выбирается автоматически; при повторном открытии сохраняется
-прежний выбор. Фильтры «В ролике» и «Пропуск» управляют показом эпизодов.
-Можно вручную исключать ненужные отрывки и отменять или повторять правки.
-
-«Подрезка ролика» раскрывает шкалу внутри главного окна. Выделите ненужный
-участок и нажмите «Вырезать участок». Можно сделать несколько вырезок.
-«Сохранить копию» предлагает два варианта:
-- «Просто вырезать» — результат короче, темп остальной части сохраняется.
-- «Вырезать и сохранить длительность» — основная часть пересобирается
-  до нужного времени при достаточном материале. Если вырезка задела начало
-  заставки или презентации, эта часть восстанавливается при пересборке.
-Эта возможность предусмотрена для всех восьми режимов.
-
-Вырезки и ручные изменения эпизодов работают вместе. «Создать ролик» также
-учитывает несохранённые вырезки; отдельно сохранять копию перед этим не нужно.
-Предыдущие версии сохраняются. Корзина возле списка версий удаляет выбранный
-готовый вариант после подтверждения. Оригинальные записи не удаляются.
-
-ШАБЛОНЫ НАСТРОЕК
-
-Кнопка «Шаблоны» в верхней панели открывает компактную строку:
-- Выберите сохранённый шаблон и нажмите галочку, чтобы применить его.
-- Плюс открывает поле имени; введите название и нажмите галочку или Enter,
-  чтобы сохранить текущие настройки как шаблон.
-- Во время ввода плюс превращается в крестик. Крестик или Escape отменяет
-  создание и возвращает прежний выбор. В обычном списке Escape закрывает панель.
-- Корзина удаляет выбранный шаблон после подтверждения.
-Применение меняет настройки монтажа, сохраняя ваши исходники и ручные правки.
-Ctrl+Z отменяет применение. Шаблоны доступны и после перезапуска программы.
+РУССКИЙ
+1. Распакуйте всю папку и запустите ArtLapse.exe. Установка Python не нужна.
+2. Создайте проект кнопкой +, добавьте видео MP4/MKV/MOV.
+3. Выберите режим, длительность, музыку и нажмите «Создать ролик».
+4. Включите подрезку: видео и музыка редактируются в основном окне.
+Наведите мышь на нужную дорожку: Q/Й — разделить, Delete — удалить,
+Ctrl+Z / Ctrl+Y — отменить / вернуть, Пробел — воспроизведение / пауза.
+Тяните края фрагмента для подрезки. ПКМ на музыке добавляет плавное начало
+или затухание; по умолчанию кривые выключены. Новый трек вставляйте в
+свободный промежуток. В версиях «под бит» изменение музыки запрещено.
+Примените правки для создания новой версии. Оригиналы не изменяются.
+Готовый совместимый анализ используется повторно, статус сообщает о кэше.
+Результаты — в renders проекта, прежние версии доступны в списке «Версия».
+Кнопка RU / EN меняет язык. Версия видна рядом с названием программы.
 
 ОБНОВЛЕНИЯ
+Распакуйте новый выпуск в отдельную папку. Закройте приложение и перенесите
+папку data из предыдущей версии, если хотите сохранить настройки.
+Не перемещайте исходники и проекты. Проверка обновлений — кнопка круговой стрелки.
+Не переносите только EXE: _internal и bin должны оставаться рядом.
+Справка: https://github.com/dmitriyermolenko81/ArtLapse/blob/v0.1.3/README.ru.md
 
-При запуске программа в фоне проверяет новые версии на GitHub.
-Круговая стрелка справа вверху запускает проверку вручную.
-Если вышла новая версия, нажмите «Скачать» или отложите кнопкой «Позже».
-«Скачать» открывает готовый Windows ZIP в браузере. Распакуйте его целиком
-в отдельную папку. Программа не устанавливает обновление автоматически.
-Для переноса настроек после закрытия программы скопируйте папку data
-из прежней папки приложения в новую. Проекты и исходные записи оставьте на месте.
-Без интернета автоматическая проверка не мешает работе.
-
-ХРАНЕНИЕ, ПЕРЕНОС И ПОМОЩЬ
-
-Переносите всю папку ArtLapse, включая _internal и bin. Настройки и журналы
-появляются в data рядом с EXE; для их сохранения папка должна быть доступна
-для записи. Не запускайте программу прямо из ZIP. Перемещение программы
-само по себе не переносит исходники и проекты: храните их отдельно и
-сохраняйте доступ к записям, музыке и картинкам, использованным в проекте.
-
-Если возникла ошибка, сохраните её текст и журнал из data/logs. Если видео
-не открывается, убедитесь, что весь архив распакован и запись доступна.
-Анализ помогает выбрать материал, но спорные эпизоды стоит проверить вручную.
-Программа локальная; для обычного монтажа и экспорта интернет не нужен.
-
-
-======================================================================
 ENGLISH
-======================================================================
-
-ArtLapse — first launch
-
-1. Keep the entire application folder in a convenient, writable location.
-   If you received an archive, extract it completely before launching.
-2. Run ArtLapse.exe. No installation or administrator rights are required.
-3. Click “+”, create a project and add your source videos.
-4. Choose a mode, duration and music, then click “Create video”.
-   The finished video is saved in the selected project's renders folder.
-
-The RU / EN button in the upper-right corner switches the interface language.
-Python, FFmpeg and the required libraries are already included.
-Editing and exporting work offline. Your source videos are not modified.
-
-MODES AT A GLANCE
-
-TIMELAPSE section:
-- Episodes — shortens detected pauses and combines the main stages of your work.
-- Speed-up — speeds up the entire recording without automatic cuts.
-
-SHORTS section:
-- 9:16 — creates a short vertical edit from 3D sculpting episodes.
-- Episodes (music) — moving video clips change on musical accents;
-  the work continues within each clip.
-- Music (still frames) — individual still frames change to the music's rhythm.
-- Ps 9:16 — creates a vertical drawing-process edit framed within the canvas.
-- Ps episodes — moving drawing clips change to the music.
-- Ps music — drawing stages are shown as still frames set to music.
-
-Shorts also support a square 1:1 picture with bands inside a vertical video.
-
-WORKING WITH A PROJECT
-
-Create a project with + in the top bar and use Add video on the left to add
-MP4, MKV or MOV recordings. The folder button opens an existing project;
-the nearby list provides recent projects. Save stores the project settings;
-Create video exports the result. Keep the source recordings at accessible paths.
-
-Choose a mode and output duration on the right. Turn the mouse wheel over
-hours, minutes or seconds, or click a number to type it. Enter an output
-filename at the bottom and click Create video. Long recordings can take time
-to analyse and export; a long task can be cancelled. Results go into your
-project's renders folder. Open finished videos opens that folder; Version
-switches between saved results.
-
-FRAMING, MUSIC AND INTRO
-
-Use the whole frame or set a frame around the area you want to show.
-Shorts support vertical and square compositions. Check framing in the preview.
-Choose your music in Sound using the musical-note button. Music modes use
-detected accents to change clips or still frames. The intro image and
-presentation clip are included in the output duration. When a presentation
-clip is selected, the intro image is not used. A very short Photoshop target
-may be extended to preserve a readable finale.
-
-EPISODES AND TRIMMING
-
-Editing episodes opens the detected segments, preview and timeline.
-The first episode is selected initially; reopening restores your selection.
-In video and Skip filter which episodes are displayed. You can manually
-exclude unwanted segments and undo or redo edits.
-
-Video trimming opens a timeline within the main window. Select an unwanted
-range and click Cut section. Multiple cuts are supported. Save a copy offers:
-- Just cut: shortens the result while preserving the pace of the remainder.
-- Cut and keep duration: rebuilds the main section to fill the target duration
-  when sufficient material is available. An intro or presentation section
-  affected by a cut at the beginning is restored during the rebuild.
-This option is supported in all eight modes.
-
-Trimming and episode changes are combined. Create video also uses unsaved
-cuts, so you do not need to save a separate copy first. Previous versions
-remain available. The trash icon beside Version deletes the selected rendered
-version after confirmation. Original recordings are not deleted.
-
-SETTINGS TEMPLATES
-
-Templates in the top bar opens a compact row:
-- Select a saved template and click the check mark to apply it.
-- Click +, enter a name and click the check mark or press Enter to save
-  the current settings as a template.
-- During entry, + becomes a cross. Click the cross or press Escape to cancel
-  creation and restore the previous selection. Escape closes the normal list.
-- The trash icon deletes the selected template after confirmation.
-Applying a template keeps your sources and manual edits. Ctrl+Z undoes the
-application. Saved templates remain available after restarting ArtLapse.
+1. Extract the entire ZIP and run ArtLapse.exe. Python, Qt and FFmpeg are included.
+2. Create a project with +, add recordings and choose mode, duration and music.
+3. Create a video, then enable trimming to edit video and music in the main window.
+Hover a lane: Q splits, Delete removes, Ctrl+Z / Ctrl+Y undo / redo.
+Space plays / pauses. Drag clip edges to trim. Right-click music to add/remove
+fade-in or fade-out. Fades are off by default. Add tracks in free gaps;
+existing following clips are preserved. Beat-synced versions lock music editing.
+Apply edits to create a new version. Original recordings remain unchanged.
+Completed compatible analysis is reused; cache reuse is shown in the status.
+Results are stored in the project's renders directory. Use Version to switch results.
+RU / EN switches the language. The top bar shows the application version.
 
 UPDATES
+Extract a new release into a separate folder. Close ArtLapse and copy the previous
+data folder if you want to retain preferences. Keep projects and original media
+in place. Use the circular-arrow button to check for updates.
+Keep _internal and bin beside ArtLapse.exe. Do not move just the executable.
+Guide: https://github.com/dmitriyermolenko81/ArtLapse/blob/v0.1.3/README.md
 
-ArtLapse checks GitHub for new releases in the background at startup.
-The circular-arrow button in the top bar checks again manually.
-When an update is available, choose Download or Later. Download opens the
-complete Windows ZIP in your browser. Extract it to a separate folder.
-Updates are not installed automatically. To transfer preferences, close
-the application and copy data from the previous application folder into
-the new one. Keep projects and original media in place. Offline editing
-and exporting remain available.
-
-STORAGE, MOVING AND HELP
-
-Move the entire ArtLapse folder, including _internal and bin. Settings and
-logs are created in data beside the EXE, so this folder must be writable.
-Do not run directly from the ZIP. Moving the application does not move your
-projects or source media: keep those separately and maintain access to the
-recordings, music and images referenced by each project.
-
-If an error occurs, keep its message and the log from data/logs. If a video
-does not open, check that you extracted the whole archive and that the source
-is accessible. Review uncertain episodes manually; automatic analysis assists
-selection. Normal editing and exporting work locally without internet access.
-
-
-LICENSE AND COMPONENT SOURCES / ЛИЦЕНЗИИ И ИСХОДНИКИ
-
-Application terms / Условия: _internal/LICENSE
-Notices / Уведомления: _internal/THIRD_PARTY_NOTICES.md, _internal/licenses
-Source and replacement instructions: _internal/docs/RUNTIME_SOURCES.md
-The third-party source archive is optional and is not needed to run ArtLapse.
-Исходники библиотек не нужны для запуска готовой программы.
-Release: https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.2
-Library sources (unchanged): https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.0/ArtLapse-0.1.0-ThirdParty-Sources.zip
+LICENSES
+Free personal and commercial use under the included LICENSE. The application is
+not offered as open source. Third-party notices, library source links and LGPL
+replacement instructions are in _internal/docs and _internal/licenses.
+No personal projects, recordings or preferences are included.

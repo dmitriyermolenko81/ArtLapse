@@ -1,6 +1,7 @@
 """Beat grid and local intensity for music-driven still-frame editing."""
 
 import tempfile
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
@@ -23,6 +24,11 @@ class BeatAnalysisSettings:
     onset_density_seconds: float = 1.5
     density_weight: float = 0.65
     onset_peak_quantile: float = 0.65
+    accent_window_seconds: float = 0.12
+    accent_context_seconds: float = 2.0
+    accent_ratio: float = 1.6
+    accent_reference_quantile: float = 0.9
+    accent_minimum_relative: float = 0.35
     foreground_low_hz: int = 45
     foreground_mid_hz: int = 300
     foreground_high_hz: int = 3_000
@@ -229,6 +235,13 @@ def beat_profile(
     path: Path, seconds: float, loop: bool, cancel: Event | None
 ) -> list[tuple[float, float]]:
     """Return continuous tracked beats and section activity, aligned to attacks."""
+    return [(time, activity) for time, activity, _ in beat_dynamics(path, seconds, loop, cancel)]
+
+
+def beat_dynamics(
+    path: Path, seconds: float, loop: bool, cancel: Event | None,
+) -> list[tuple[float, float, float]]:
+    """Separate sustained musical activity from unusually strong local beat attacks."""
     samples = _samples(path, seconds, loop, cancel)
     if len(samples) < SETTINGS.window_size * 3:
         return []
@@ -237,20 +250,36 @@ def beat_profile(
         return []
     grid_times = track_beats(samples, SETTINGS.sample_rate, cancel)
     if len(grid_times) < 2:
-        return _spectral_attacks(times, onset, level)
+        return [(time, activity, 0.0) for time, activity in _spectral_attacks(times, onset, level)]
     density = _onset_density(onset)
     density_reference = max(float(np.quantile(density, 0.8)), 1e-6)
     reference = max(float(np.quantile(level, 0.8)), 0.0001)
     frame_rate = SETTINGS.sample_rate / SETTINGS.hop_size
     smooth_width = max(3, round(SETTINGS.intensity_window_seconds * frame_rate))
     smooth_level = _smooth(level, smooth_width)
-    beats: list[tuple[float, float]] = []
+    radius = max(1, round(SETTINGS.accent_window_seconds * frame_rate))
+    attacks = []
     for time in grid_times:
+        index = int(np.searchsorted(times, time))
+        window = onset[max(0, index - radius):min(len(onset), index + radius + 1)]
+        attacks.append(float(window.max()) if len(window) else 0.0)
+    attack_reference = max(float(np.quantile(attacks, SETTINGS.accent_reference_quantile)), 1e-6)
+    beats: list[tuple[float, float, float]] = []
+    for index, time in enumerate(grid_times):
+        if cancel and index % 256 == 0 and cancel.is_set():
+            raise Cancelled("Music dynamics analysis cancelled")
         local_level = float(np.interp(time, times, smooth_level))
         if local_level < reference * SETTINGS.silence_fraction:
             continue
         local_density = float(np.interp(time, times, density))
-        beats.append(
-            (time, _music_activity(local_level / reference, local_density / density_reference))
-        )
+        left = bisect_left(grid_times, time - SETTINGS.accent_context_seconds)
+        right = bisect_right(grid_times, time + SETTINGS.accent_context_seconds)
+        neighbours = attacks[left:index] + attacks[index + 1:right]
+        baseline = max(float(np.median(neighbours)) if neighbours else attacks[index], 1e-6)
+        accent = (min(1.0, attacks[index] / attack_reference)
+                  if attacks[index] >= max(baseline * SETTINGS.accent_ratio,
+                                           attack_reference * SETTINGS.accent_minimum_relative)
+                  else 0.0)
+        activity = _music_activity(local_level / reference, local_density / density_reference)
+        beats.append((time, activity, accent))
     return beats

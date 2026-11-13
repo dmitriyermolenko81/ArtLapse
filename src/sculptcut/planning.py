@@ -12,7 +12,7 @@ from pydantic import Field
 from sculptcut.analysis import analysis_key
 from sculptcut.budget import distribute
 from sculptcut.development import development_key
-from sculptcut.domain import Model, Project, Roi, SourceMedia, SubjectCamera
+from sculptcut.domain import Model, Project, Roi, SourceMedia, SpeedRamp, SubjectCamera
 from sculptcut.idle import IdleRange, project_idle
 from sculptcut.intro import body_frame_budget, intro_signature, output_frame_count
 from sculptcut.music_library import music_signature
@@ -34,6 +34,9 @@ class RenderDecision(Model):
     provenance: str
     sample_times_us: list[int] = Field(default_factory=list)
     subject_camera: SubjectCamera | None = None
+    speed_ramp: SpeedRamp | None = None
+    episode_id: str | None = None
+    episode_score: float | None = None
 
 
 class RenderPlan(Model):
@@ -195,6 +198,11 @@ def validate_plan(project: Project, plan: RenderPlan) -> None:
                 raise ValueError("Invalid action frame count")
             if decision.action not in ("DROP", "SPEED", "KEEP", "HOLD", "MONTAGE"):
                 raise ValueError("Unsupported render action")
+            ramp = decision.speed_ramp
+            if ramp is not None and decision.action in ("SPEED", "KEEP") and not (
+                ramp.start_us <= decision.source_start_us < decision.source_end_us <= ramp.end_us
+            ):
+                raise ValueError("Speed ramp does not cover the source window")
             if decision.action == "MONTAGE":
                 samples = decision.sample_times_us
                 if not (
@@ -222,7 +230,8 @@ def validate_plan(project: Project, plan: RenderPlan) -> None:
             available = max(
                 1,
                 math.floor(
-                    (decision.source_end_us - decision.source_start_us)
+                    # A split at a frame boundary rounds timestamps to whole microseconds.
+                    (decision.source_end_us - decision.source_start_us + 1)
                     * plan.output_fps
                     / 1_000_000
                 ),
@@ -323,10 +332,39 @@ def plan_project(
         project.settings, project.settings.output_fps, target_seconds,
     ) / project.settings.output_fps
     validate_sources(root, project)
+    from sculptcut.source_catalogue import catalogue, split_plan
+
+    source_episodes = catalogue(root, project)
     from sculptcut.overrides import apply_overrides, exclude_dropped
 
     project_identity = project.model_dump(mode="json")
+    project_identity['settings'].pop('output_name', None)
+    if project.settings.preset == "timelapse":
+        from dataclasses import asdict
+
+        from sculptcut.timelapse_phrases import SETTINGS as PHRASES
+        from sculptcut.work_episodes import SETTINGS as WORK_EPISODES
+
+        project_identity["settings"]["phrases_259"] = asdict(PHRASES)
+        project_identity["settings"]["work_episodes_260"] = asdict(WORK_EPISODES)
+    if project.settings.preset in MUSIC_SHORTS_PRESETS:
+        from dataclasses import asdict
+
+        from sculptcut.audio_beat_sync import DENSITY
+        from sculptcut.music_beats import SETTINGS as BEAT_ANALYSIS
+        from sculptcut.visual_transitions import SETTINGS as TRANSITIONS
+
+        project_identity["music_dynamics"] = {
+            "version": 246, "density": asdict(DENSITY), "analysis": asdict(BEAT_ANALYSIS),
+        }
+        project_identity["visual_transitions"] = {"version": 249, **asdict(TRANSITIONS)}
     project_identity["shared_episode_edits"] = "shared-source-edits-141"
+    if project.settings.preset in ("shorts", "music_shorts") and not uses_square(project.settings):
+        from dataclasses import asdict
+
+        from sculptcut.shorts import CAMERA_STABILITY
+
+        project_identity["zbrush_viewport"] = {"version": 250, **asdict(CAMERA_STABILITY)}
     if project.settings.preset in ("timelapse", "shorts", "beat_shorts", "music_shorts"):
         project_identity["settings"]["segmentation_version"] = SEGMENT_VERSION
     if project.settings.preset in ("timelapse", "shorts", "music_shorts"):
@@ -349,9 +387,9 @@ def plan_project(
             project_identity["settings"].pop(key, None)
     if uses_square(project.settings):
         project_identity["settings"]["square_camera_version"] = (
-            "horizontal-208-fixed-music-episodes"
+            "horizontal-256-canvas-guard-fixed-music"
             if project.settings.preset in ("music_shorts", "photoshop_music_shorts")
-            else "horizontal-2-viewport"
+            else "horizontal-256-canvas-guard"
         )
     if project.settings.preset in ("music_shorts", "photoshop_music_shorts"):
         from dataclasses import asdict
@@ -359,6 +397,9 @@ def plan_project(
         from sculptcut.music_episodes import SETTINGS as MUSIC_EPISODES
 
         project_identity["settings"]["music_episodes"] = asdict(MUSIC_EPISODES)
+        project_identity["settings"]["episode_edits_version"] = 254
+        if project.settings.preset == "music_shorts":
+            project_identity["settings"]["process_budget"] = "musical-episode-edits-251"
         if project.settings.preset == "photoshop_music_shorts":
             from sculptcut.photoshop_story import STORY as DRAWING_STORY
 
@@ -369,8 +410,13 @@ def plan_project(
         from sculptcut.timelapse_cleanup import SETTINGS
 
         project_identity["settings"]["timelapse_cleanup"] = asdict(SETTINGS)
+        project_identity["settings"]["final_presentation_policy"] = "framed-finale-311"
+    if (project.settings.preset in ('timelapse', 'shorts', 'music_shorts') and any(
+            o.action == 'SET_SPEED' and o.restore_omitted and not o.exact_selection
+            for o in project.overrides)):
+        project_identity['settings']['restored_work_policy'] = 'automatic-fallback-304'
     request_key = cache_key(
-        "total-duration-207-v2",
+        "total-duration-319-shared-source-catalogue",
         "plan-206-photoshop-music-episodes"
         if project.settings.preset == "photoshop_music_shorts"
         else "plan-146-music-first-episodes"
@@ -393,23 +439,69 @@ def plan_project(
     )
     saved = root / "render_plan.json"
 
+    def fit_duration(plan: RenderPlan) -> RenderPlan:
+        budget = body_frame_budget(project.settings, plan.output_fps, total_target_seconds)
+        if plan.actual_frame_count > budget:
+            from sculptcut.restored_work import fit_edit_budget, trim_budget_windows
+
+            plan = fit_edit_budget(project, plan, budget)
+            plan = trim_budget_windows(project, plan)
+        return plan
+
     def finish_plan(plan: RenderPlan) -> RenderPlan:
+        overflow = plan.actual_frame_count > body_frame_budget(
+            project.settings, plan.output_fps, total_target_seconds,
+        )
+        plan = fit_duration(plan)
+        if plan.settings.get("work_episodes_version"):
+            from sculptcut.work_episodes import refresh_highlights
+
+            plan = refresh_highlights(root, project, plan, cancel)
+        if overflow:
+            from sculptcut.restored_work import trim_budget_windows
+
+            if project.settings.preset in ("music_shorts", "photoshop_music_shorts"):
+                from sculptcut.music_episodes import music_events, retime_episodes
+
+                events, offset = music_events(root, project, plan.actual_frame_count, cancel)
+                plan = retime_episodes(project, plan, events, offset, cancel,
+                                      preserve_source_windows=True)
+            plan = trim_budget_windows(project,plan)
+            if project.settings.preset not in MUSIC_SHORTS_PRESETS:
+                from sculptcut.rhythm import align_plan
+
+                plan = align_plan(root, project, plan, cancel)
+                plan = trim_budget_windows(project, plan)
+        if plan.settings.get("automatic_budget_fit"):
+            from sculptcut.restored_work import trim_budget_windows
+
+            # Rhythm and the final presentation can adjust frame counts after
+            # early fitting. Recheck speed limits on those final durations too.
+            plan = trim_budget_windows(project, plan)
+        from sculptcut.final_result import ensure_final_result
+
+        plan = ensure_final_result(root, project, plan, cancel)
+        # Early presentation can receive only a frame while manual rules still
+        # overflow the budget. Re-reserve it after fitting/cleanup, when the
+        # remaining work has its final allocations. Keep the total unchanged.
+        if project.settings.preset == "timelapse":
+            plan = present_final_result(project, plan)
+        from sculptcut.timelapse_phrases import smooth_phrases
+
+        plan = smooth_phrases(plan)
         requested = max(1, round(total_target_seconds * plan.output_fps))
-        if (plan.target_frame_count < requested
-                and output_frame_count(project.settings, plan.output_fps,
-                                       plan.actual_frame_count) > requested):
-            raise ValueError(
-                "Монтаж не укладывается в заданное время вместе с заставкой/презентацией. "
-                "Увеличьте длительность или измените ручные ограничения скорости."
-            )
         result = plan.model_copy(update={"settings": plan.settings | {
-            "request_key": request_key, "duration_budget": "total-207",
+            "request_key": request_key, "duration_budget": "total-255-all-modes",
             "target_seconds": total_target_seconds,
             "requested_output_frames": requested,
             "actual_output_frames": output_frame_count(
                 project.settings, plan.output_fps, plan.actual_frame_count,
             ),
         }})
+        result = split_plan(project, result)
+        result = result.model_copy(update={'settings': result.settings | {
+            'source_catalogue_version': 'source-catalogue-319',
+            'source_episode_count': len(source_episodes)}})
         validate_plan(project, result)
         atomic_write(saved, result.model_dump_json(indent=2))
         return result
@@ -419,6 +511,7 @@ def plan_project(
             cached = RenderPlan.model_validate_json(saved.read_text(encoding="utf-8"))
             if cached.settings.get("request_key") == request_key:
                 validate_plan(project, cached)
+                phase('Используем сохранённый монтажный план')
                 return cached
         except (ValueError, OSError):
             pass  # A derived plan can be rebuilt from the validated project and analysis.
@@ -430,6 +523,9 @@ def plan_project(
                 root, project, cancel, (lambda value: progress(value * 0.35)) if progress else None
             )
             plan = exclude_dropped(project, build_plan(project, idle, target_seconds))
+            from sculptcut.short_catalogue import catalogue_score, complete_short_catalogue
+
+            plan = complete_short_catalogue(root, project, plan, [], cancel, phase)
             if project.settings.preset == "photoshop_beat_shorts":
                 from sculptcut.photoshop_beats import photoshop_beat_plan
 
@@ -437,10 +533,13 @@ def plan_project(
                 plan = apply_overrides(project, plan)
                 plan = present_final_result(project, plan)
                 return finish_plan(plan)
-            from sculptcut.photoshop_stability import score_source_window
+            from sculptcut.photoshop_stability import DrawingViews, score_source_window
             from sculptcut.photoshop_story import episodic_photoshop_plan
 
             def score_drawing(source: SourceMedia, start: int, end: int) -> float:
+                if (plan.settings.get("complete_short_catalogue")
+                        and not plan.settings.get("short_catalogue_fallback")):
+                    return catalogue_score(plan, source.id, start, end)
                 return score_source_window(
                     root, source, start, end, cancel, webcam_roi(project.settings, source.id),
                 )
@@ -452,17 +551,20 @@ def plan_project(
 
                 phase("Подстраиваем смену видеоэпизодов под музыку")
                 grid = music_episode_grid(root, project, plan.actual_frame_count, cancel)
-                plan = photoshop_music_plan(
-                    project, plan, grid, score_drawing, cancel, drawing_progress,
-                )
+                with DrawingViews(project, cancel) as views:
+                    plan = photoshop_music_plan(
+                        project, plan, grid, score_drawing, cancel, drawing_progress,
+                        view_signature=views.signature,
+                    )
             else:
                 plan = episodic_photoshop_plan(project, plan, score_drawing, drawing_progress)
         else:
-            plan = simple_speed_plan(project, target_seconds)
+            plan = apply_overrides(project, simple_speed_plan(project, target_seconds))
         if project.settings.preset in ("photoshop_shorts", "photoshop_music_shorts"):
             from sculptcut.photoshop import reframe_photoshop
 
             plan = apply_overrides(project, plan)
+            plan = fit_duration(plan)
             if project.settings.preset == "photoshop_music_shorts":
                 from sculptcut.music_episodes import sync_music_episodes
 
@@ -501,13 +603,30 @@ def plan_project(
     )
     from sculptcut.importance import importance_project
 
-    phase("Analyzing camera motion and classifying activity")
-    segments = importance_project(root, project, cancel)
+    segments = importance_project(root, project, cancel, stage=phase)
+    from sculptcut.restored_work import prepare_restored_work
+
+    project, plan, bounded_restores = prepare_restored_work(root, project, plan)
+    if bounded_restores:
+        # Bound a restored gap before choosing episodes, so long idle tails
+        # never consume the new montage's selection or duration budget.
+        availability = project.model_copy(update={"overrides": [
+            rule.model_copy(update={"action": "RETAIN"})
+            if rule.action == "SET_SPEED" else rule
+            for rule in project.overrides
+            if rule.action == "DROP" or (rule.action == "SET_SPEED" and rule.restore_omitted)
+        ]})
+        plan = apply_overrides(availability, plan)
+    if project.settings.preset in ("shorts", "music_shorts", "beat_shorts"):
+        from sculptcut.short_catalogue import complete_short_catalogue
+
+        plan = complete_short_catalogue(root, project, plan, segments, cancel, phase)
     if project.settings.preset == "beat_shorts":
         from sculptcut.beat_shorts import beat_still_plan
 
         plan = beat_still_plan(root, project, plan, segments, target_seconds, cancel, progress)
         plan = apply_overrides(project, plan)
+        plan = fit_duration(plan)
         from sculptcut.beat_sync import apply_beat_sync
 
         if plan.settings.get("beat_still_fallback") == "motion":
@@ -528,15 +647,11 @@ def plan_project(
         >= 2 * project.settings.timelapse_episode_source_seconds * 1_000_000
     ):
         from sculptcut.shorts_quality import EpisodeInspector
-        from sculptcut.timelapse_story import episodic_timelapse_plan
+        from sculptcut.work_episodes import project_highlights
 
         phase("Selecting episodes by persistent visual changes")
-        with EpisodeInspector(root, project, cancel) as inspector:
-            plan = episodic_timelapse_plan(project, plan, segments, inspector.development)
-        from sculptcut.timelapse_coverage import limit_setup_context, preserve_work_bridges
-
-        plan = preserve_work_bridges(project, plan, segments)
-        plan = limit_setup_context(project, plan, segments)
+        with EpisodeInspector(root, project, cancel, work_only=True) as inspector:
+            plan = project_highlights(root,project,plan,segments,inspector.development,cancel,phase)
     elif (
         project.settings.expressive_pacing
         and sum(s.duration_us for s in project.sources) >= 30_000_000
@@ -556,7 +671,11 @@ def plan_project(
 
         phase("Removing zoom-only movements and static views")
         plan = clean_timelapse(root, project, plan, cancel, progress)
-    plan = apply_overrides(project, plan)
+    plan = apply_overrides(project, plan, manual=bounded_restores,
+                           bounded_restores=bounded_restores, inherited_speeds=[
+                               rule for rule in project.overrides
+                               if rule.action == "SET_SPEED" and not rule.restore_omitted
+                           ])
     if plan.settings.get("story") == "static_episodes":
         from sculptcut.timelapse_story import reserve_final_view
 
@@ -567,7 +686,10 @@ def plan_project(
         plan = balance_process_budget(project, plan)
     from sculptcut.montage import apply_montage
 
-    if plan.settings.get("story") not in ("process", "static_episodes"):
+    # Discarded source tails must not influence viewport detection or camera
+    # positions for the short windows that will actually be exported.
+    plan = fit_duration(plan)
+    if plan.settings.get("story") not in ("process", "static_episodes", "phrased_timelapse"):
         plan = apply_montage(root, project, plan)
     from sculptcut.rhythm import align_plan
 

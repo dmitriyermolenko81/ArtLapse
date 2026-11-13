@@ -187,7 +187,7 @@ def test_refill_preserves_duration_after_episode_still_deletion(tmp_path: Path) 
     assert prepare_combined_edit(root, result).plan.actual_frame_count == 90
 
 
-def test_refill_rejects_infeasible_fixed_episode_speed(tmp_path: Path) -> None:
+def test_refill_rebudgets_episode_speed_without_restoring_cuts(tmp_path: Path) -> None:
     root, project, _, original = fixture_project(tmp_path)
     save_project(root, project.model_copy(update={"overrides": [Override(
         source_id=project.sources[0].id, start_us=0, end_us=9_000_000,
@@ -195,8 +195,18 @@ def test_refill_rejects_infeasible_fixed_episode_speed(tmp_path: Path) -> None:
     )]}))
     from sculptcut.combined_edits import prepare_refill_edit
 
-    with pytest.raises(ValueError, match="скорости эпизодов"):
-        prepare_refill_edit(root, original, [(0, 500_000)])
+    edit = prepare_refill_edit(root, original, [(0, 500_000)])
+    validate_plan(edit.project, edit.plan)
+    assert edit.plan.actual_frame_count == edit.plan.target_frame_count == 90
+    kept = [d for d in edit.plan.decisions if d.output_frame_count]
+    assert kept and all(d.source_start_us >= 1_500_000 for d in kept)
+    output = root / "renders" / "rebudgeted.mp4"
+    render_combined_edit(root, edit, output, Event(), lambda _: None, encoder="libx264")
+    verify_output(output, 90, 30)
+    reopened = prepare_combined_edit(root, output)
+    assert reopened.plan.actual_frame_count == 90
+    assert all(d.source_start_us >= 1_500_000 for d in reopened.plan.decisions
+               if d.output_frame_count)
 
 
 def test_bookend_trim_survives_episode_export_reopen_music_and_refill(tmp_path: Path) -> None:

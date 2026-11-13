@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 
 import pytest
@@ -5,11 +6,11 @@ from test_beat_shorts import pulse_track
 from test_intro import make_image
 
 from sculptcut.analysis import extract_features
-from sculptcut.domain import Project, ProjectSettings
+from sculptcut.domain import Override, Project, ProjectSettings
 from sculptcut.fixtures import generate_fixture
 from sculptcut.intro import body_frame_budget, body_start_frame, output_frame_count
 from sculptcut.media import discover, run_process
-from sculptcut.planning import plan_project
+from sculptcut.planning import RenderPlan, plan_project
 from sculptcut.project import create_project, fingerprint, save_project
 from sculptcut.proxy import make_proxies
 from sculptcut.rendering import render, verify_output
@@ -34,8 +35,15 @@ def test_bookends_use_the_total_integer_frame_budget(bookend: str, fps: int) -> 
     if bookend == "intro" and fps == 30:
         assert frames == 1755  # 58.5 seconds of body + 1.5 seconds of effective cover.
     if bookend in ("start", "end"):
-        assert frames == 55 * fps  # Presentation wins over the inactive image.
-        assert body_start_frame(settings, fps, frames) == (5 * fps if bookend == "start" else 0)
+        if bookend == "start":
+            assert frames == 55 * fps  # Legacy competing opening image is inactive.
+            assert body_start_frame(settings, fps, frames) == 5 * fps
+        else:
+            from sculptcut.intro import intro_frames
+
+            still, overlap = intro_frames(settings, fps, frames)
+            assert frames == 55 * fps - still + overlap
+            assert body_start_frame(settings, fps, frames) == still - overlap
 
 
 @pytest.mark.parametrize("seconds", [.01, .5, 1, 1.5])
@@ -58,6 +66,65 @@ def media(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path, Path]:
     make_image(image, (0, 220, 0))
     pulse_track(music, [.25 + i * .5 for i in range(26)], seconds=14)
     return video, image, music
+
+
+@pytest.mark.parametrize("preset", ["shorts", "photoshop_shorts"])
+def test_manual_speed_recuts_regular_shorts_inside_both_bookends(
+    tmp_path: Path, media: tuple[Path, Path, Path], preset: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    video, image, music = media
+    root = tmp_path / "project"
+    project = create_project(root, [video])
+    source = project.sources[0]
+    project = project.model_copy(update={"settings": ProjectSettings.model_validate({
+        "preset": preset, "target_seconds": 6, "intro_image": image,
+        "intro_position": "end", "intro_seconds": 1, "intro_transition_seconds": .25,
+        "presentation_video": video, "presentation_seconds": 1,
+        "presentation_position": "start", "music_path": music,
+        "proxy_width": 192, "proxy_fps": 5,
+    }), "overrides": [
+        Override(source_id=source.id, start_us=0, end_us=3_000_000, action="DROP"),
+        Override(source_id=source.id, start_us=3_000_000, end_us=source.duration_us,
+                 action="SET_SPEED", speed=1),
+    ]})
+    save_project(root, project)
+    if preset == "shorts":
+        extract_features(root, project)
+    # Camera analysis must see only the final, budgeted source windows.
+    from sculptcut import photoshop, shorts
+
+    module = shorts if preset == "shorts" else photoshop
+    name = "reframe_shorts" if preset == "shorts" else "reframe_photoshop"
+    original_framing = getattr(module, name)
+    expected = body_frame_budget(project.settings, 30, 6)
+    framing_budgets = []
+
+    def checked_framing(*args, **kwargs):
+        incoming = next(value for value in args if isinstance(value, RenderPlan))
+        assert incoming.actual_frame_count <= expected
+        framing_budgets.append(incoming.actual_frame_count)
+        return original_framing(*args, **kwargs)
+
+    monkeypatch.setattr(module, name, checked_framing)
+    plan = plan_project(root, project, 6)
+    assert framing_budgets == [expected]
+    assert plan.actual_frame_count == plan.target_frame_count == expected
+    assert plan.settings["actual_output_frames"] == 180
+    assert plan.settings["automatic_budget_fit"] == 1
+    assert not any("infeasible" in warning.lower() for warning in plan.warnings)
+    kept = [d for d in plan.decisions if d.output_frame_count]
+    assert kept and all(d.source_start_us >= 3_000_000 for d in kept)
+    assert all(d.source_end_us-d.source_start_us <= math.ceil(d.output_frame_count*1_000_000/30)
+               for d in kept if d.action != "HOLD")
+    assert plan_project(root, project, 6) == plan
+    from sculptcut.combined_edits import apply_episode_edits
+
+    assert apply_episode_edits(project, plan, root=root).actual_frame_count == expected
+    # Keep all actual analysis, source selection, bookends and audio; reduce only delivery size.
+    monkeypatch.setattr("sculptcut.rendering.export_size", lambda *args: (180,320))
+    output = render(root, project, plan, tmp_path / "fitted.mp4", encoder="libx264")
+    verify_output(output, 180, 30, expected_audio=True)
 
 
 @pytest.mark.parametrize("preset", PRESETS)
@@ -101,7 +168,8 @@ def test_presentation_and_missing_inactive_cover_fit_total_duration(
     project = project.model_copy(update={"settings": ProjectSettings(
         preset="speed", target_seconds=6, presentation_video=video,
         presentation_seconds=2, presentation_position=position,
-        intro_image=tmp_path / "missing-inactive.png", music_path=music,
+        intro_image=tmp_path / "missing-inactive.png" if position == "start" else None,
+        music_path=music,
     )})
     save_project(root, project)
     plan = plan_project(root, project, 6)

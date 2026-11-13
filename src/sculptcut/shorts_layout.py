@@ -11,6 +11,16 @@ if TYPE_CHECKING:
     from sculptcut.planning import RenderPlan
 
 SQUARE_BACKGROUND = "0x181818"
+# Saved plans retain their original preset; new selections use moving footage.
+RETIRED_STILL_PRESETS = {
+    "beat_shorts": "music_shorts",
+    "photoshop_beat_shorts": "photoshop_music_shorts",
+}
+ACTIVE_SHORTS_PRESETS = (
+    "shorts", "music_shorts", "photoshop_shorts", "photoshop_music_shorts",
+)
+ACTIVE_PRESETS = ("timelapse", "speed", *ACTIVE_SHORTS_PRESETS)
+SELECTION_PRESETS = ("timelapse", *ACTIVE_SHORTS_PRESETS)
 SHORTS_PRESETS = (
     "shorts", "music_shorts", "beat_shorts", "photoshop_shorts", "photoshop_music_shorts",
     "photoshop_beat_shorts",
@@ -106,7 +116,7 @@ def apply_square_layout(
                     project.settings,
                     decision.source_start_us,
                     last_center.get(decision.source_id),
-                    safe_viewport(viewports, roi),
+                    safe_viewport(viewports, roi, [box for _, box in samples]),
                 )
                 last_center[decision.source_id] = camera.points[-1].x
                 decisions[index] = decision.model_copy(update={"subject_camera": camera})

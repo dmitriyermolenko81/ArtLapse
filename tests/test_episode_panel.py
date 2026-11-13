@@ -69,7 +69,13 @@ def test_real_music_wave_loop_padding_export_clock_and_cache(
     assert cache.stat().st_mtime_ns == modified
     loop_settings = settings.model_copy(update={"music_loop": True})
     looped = build_music_wave(root, loop_settings, plan, Event())
-    assert looped is not None and min(abs(t - 7.2) for t in looped.accents) < 0.03
+    assert looped is not None
+    # The last pulse is below the accent threshold after the five-second fade,
+    # but the waveform must retain its actual amplitude and timestamp.
+    late = float(np.max(looped.levels[720:726]))
+    early = float(np.max(looped.levels[220:226]))
+    assert .03 < late / early < .09
+    assert all(abs(t - 7.2) > .03 for t in looped.accents)
     output = root / "with-pulses.mp4"
     add_music(project.sources[0].path, music, output, 8, True, 0)
     verify_output(output, 240, 30, expected_audio=True)
@@ -79,7 +85,8 @@ def test_real_music_wave_loop_padding_export_clock_and_cache(
     samples = np.fromfile(pcm, dtype="<f4")
     peak_time = (np.argmax(np.abs(samples[7*4000:])) / 4000) + 7
     assert 7.19 < peak_time < 7.76
-    assert min(abs(t - peak_time) for t in looped.accents) < 0.06
+    wave_peak_time = 7 + int(np.argmax(looped.levels[700:780])) * looped.step
+    assert abs(wave_peak_time - peak_time) < .02
     # Output positions include the intro overlap and internal montage-frame changes.
     intro = settings.model_copy(update={"intro_image": root / "cover.png",
                                        "intro_seconds": 2, "intro_transition_seconds": 0.5})
@@ -264,7 +271,13 @@ def test_episode_filters_preserve_edit_and_refresh_statistics_after_edit_and_und
     episode_project: tuple[Path, Project, RenderPlan],
 ) -> None:
     app = QApplication.instance() or QApplication([])
-    root, _, _ = episode_project
+    root, project, plan = episode_project
+    # Solid-colour fixtures test visibility/history, without sculpt-work recognition.
+    save_project(root, project.model_copy(update={"settings": project.settings.model_copy(
+        update={"preset": "speed"},
+    )}))
+    plan = plan.model_copy(update={"settings": plan.settings | {"preset": "speed"}})
+    (root / "render_plan.json").write_text(plan.model_dump_json(), encoding="utf-8")
     before = (root / "project.json").read_bytes()
     base = (root / "render_plan.json").read_bytes()
     export_before = episode_export(root)[1]
@@ -484,7 +497,7 @@ def test_episode_edit_joins_global_history_and_survives_reopen_and_real_export(
         window.duration_card.minutes.setValue(1)
         window.duration_card.minutes.editingFinished.emit()
         QTimer.singleShot(20, edit_panel)
-        window.episodes_button.click()
+        window.show_episodes()
         assert not errors
         assert window.edit_history.position == 2
         edited = load_project(root).overrides
@@ -501,8 +514,15 @@ def test_episode_edit_joins_global_history_and_survives_reopen_and_real_export(
         window.render_episodes(root)
         wait_until(app, lambda: window.job is None, 60)
         assert not window.last_error, window.last_error
-        outputs = list((root / "renders").glob("*.mp4"))
+        outputs = list((root / "previews").glob("*.mp4"))
         assert len(outputs) == 1 and "исправленный" in outputs[0].name
+        assert read_variant(outputs[0])["plan"]["settings"]["draft"]
+        assert not list((root / "renders").glob("*.mp4"))
+        window.export_button.click()
+        wait_until(app, lambda: window.job is None, 60)
+        assert not window.last_error, window.last_error
+        outputs = list((root / "renders").glob("*.mp4"))
+        assert len(outputs) == 1
         _, revised = episode_export(root)
         verify_output(outputs[0], revised.actual_frame_count, revised.output_fps)
         variant = read_variant(outputs[0])
@@ -544,7 +564,7 @@ def test_missing_and_invalid_saved_plan_do_not_open_editor(tmp_path: Path) -> No
     window = MainWindow()
     try:
         window.folder.setText(str(tmp_path))
-        assert not window.episodes_button.isEnabled()
+        assert not hasattr(window, "episodes_button")
         window.show_episodes()
         assert window.last_error and window.episode_panel is None
     finally:

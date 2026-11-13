@@ -6,8 +6,8 @@ from collections.abc import Callable
 from pathlib import Path
 from threading import Event
 
-from sculptcut.domain import Project
-from sculptcut.intro import intro_frames, intro_signature
+from sculptcut.domain import Project, ProjectSettings
+from sculptcut.intro import active_intro_image, intro_frames, intro_signature
 from sculptcut.music_library import music_signature
 from sculptcut.output_naming import next_variant_path
 from sculptcut.planning import RenderPlan, plan_project
@@ -43,11 +43,13 @@ def replace_intro(
     progress: Callable[[float], None] | None = None,
     *,
     encoder: str = "auto",
+    intro_options: dict[str, object] | None = None,
 ) -> Path:
     """Create a new MP4 with another intro, without analysis or replanning."""
     if not image.is_file():
         raise ValueError(f"Файл заставки не найден: {image}")
     state = read_variant(video)
+    draft = bool((state.get("plan") or {}).get("settings", {}).get("draft"))
     if not state.get("project") or not state.get("plan"):
         raise ValueError(
             "У выбранного ролика нет сохранённого плана. "
@@ -57,14 +59,19 @@ def replace_intro(
     history = [*([bookends] if bookends else []), *cut_history(video)]
 
     snapshot_project = Project.model_validate(state["project"])
-    if snapshot_project.settings.presentation_video is not None:
-        raise ValueError(
-            "Для этого варианта выбрано презентационное видео. "
-            "Отключите презентацию и создайте новый ролик, чтобы использовать заставку."
-        )
     snapshot_project = resolve_snapshot_sources(snapshot_project, load_project(root))
-    had_intro = snapshot_project.settings.intro_image is not None
-    snapshot_settings = snapshot_project.settings.model_copy(update={"intro_image": image})
+    old_settings = snapshot_project.settings
+    had_intro = active_intro_image(old_settings) is not None
+    options = intro_options or {}
+    if set(options) - {"intro_seconds", "intro_transition_seconds", "intro_position"}:
+        raise ValueError("Unknown intro options")
+    snapshot_settings = ProjectSettings.model_validate(
+        old_settings.model_dump() | options | {"intro_image": image},
+    )
+    if (snapshot_settings.presentation_video is not None
+            and snapshot_settings.presentation_position == snapshot_settings.intro_position
+            == "start"):
+        snapshot_settings = snapshot_settings.model_copy(update={"intro_position": "end"})
     snapshot_project = snapshot_project.model_copy(update={"settings": snapshot_settings})
 
     saved_music: Path | None = None
@@ -82,6 +89,7 @@ def replace_intro(
     )
     render_project = snapshot_project.model_copy(update={"settings": render_settings})
     plan = RenderPlan.model_validate(state["plan"])
+    original_plan = plan
     plan_settings = dict(plan.settings)
     plan_settings.pop("request_key", None)
     plan_settings.update(
@@ -92,8 +100,11 @@ def replace_intro(
     )
     plan = plan.model_copy(update={"settings": plan_settings})
     replanned = False
-    if (not had_intro and not history and not has_manual_edits(video)
-            and plan.settings.get("duration_budget") == "total-207"):
+    changed_layout = (intro_frames(old_settings, plan.output_fps, plan.actual_frame_count)
+                      != intro_frames(snapshot_settings, plan.output_fps, plan.actual_frame_count)
+                      or old_settings.intro_position != snapshot_settings.intro_position)
+    if (changed_layout and not history and not has_manual_edits(video)
+            and plan.settings.get("duration_budget") in {"total-207", "total-255-all-modes"}):
         # Adding a cover changes the body budget and the soundtrack offset.
         # Reuse cached analysis, then select/retime against that smaller budget.
         plan = plan_project(
@@ -106,7 +117,15 @@ def replace_intro(
         video.parent, "intro-variant", snapshot_settings.preset
     )
 
-    if history and not had_intro:
+    if history and changed_layout and had_intro:
+        from sculptcut.shorts_refill import cuts_on_plan_clock
+
+        original = snapshot_project.model_copy(update={"settings": old_settings})
+        cuts = cuts_on_plan_clock(video, original, original_plan, [])
+        mapped = remap_bookend_cuts(cuts, old_settings, snapshot_settings,
+                                   plan.output_fps, plan.actual_frame_count)
+        history = [mapped] if mapped else []
+    elif history and not had_intro and snapshot_settings.intro_position == "start":
         still, overlap = intro_frames(snapshot_settings, plan.output_fps, plan.actual_frame_count)
         shift = round((still - overlap) * 1_000_000 / plan.output_fps)
         prefix = (round(presentation_frames(snapshot_settings, plan.output_fps)
@@ -120,7 +139,7 @@ def replace_intro(
         with tempfile.TemporaryDirectory(prefix="reintro-", dir=video.parent) as scratch:
             base = Path(scratch) / "base.mp4"
             render(
-                root, render_project, plan, base, cancel, encoder=encoder,
+                root, render_project, plan, base, cancel, encoder=encoder, preview=draft,
                 progress=(lambda value: progress(value * 0.5)) if progress else None,
                 variant_project=snapshot_project,
             )
@@ -149,7 +168,7 @@ def replace_intro(
             (lambda value: progress(0.4 + value * 0.6)) if replanned and progress else progress
         )
         result = render(
-            root, render_project, plan, destination, cancel, encoder=encoder,
+            root, render_project, plan, destination, cancel, encoder=encoder, preview=draft,
             progress=render_progress, variant_project=snapshot_project,
             variant_parent=video, variant_operation="intro",
         )
@@ -157,9 +176,54 @@ def replace_intro(
     save_project(
         root,
         current.model_copy(
-            update={"settings": current.settings.model_copy(update={"intro_image": image})}
+            update={"settings": current.settings.model_copy(update={
+                "intro_image": image,
+                "intro_seconds": snapshot_settings.intro_seconds,
+                "intro_transition_seconds": snapshot_settings.intro_transition_seconds,
+                "intro_position": snapshot_settings.intro_position,
+            })}
         ),
     )
     if progress:
         progress(1)
     return result
+
+
+def remap_bookend_cuts(
+    cuts: list[tuple[int, int]], before: ProjectSettings, after: ProjectSettings,
+    fps: int, body_frames: int,
+) -> list[tuple[int, int]]:
+    """Keep cuts attached to the same body/bookend when moving or resizing a cover."""
+    def spans(settings: ProjectSettings) -> dict[str, tuple[int, int]]:
+        still, overlap = intro_frames(settings, fps, body_frames)
+        presentation = presentation_frames(settings, fps)
+        pieces = [
+            ("presentation", presentation if settings.presentation_position == "start" else 0),
+            ("intro", still - overlap if settings.intro_position == "start" else 0),
+            ("body", body_frames),
+            ("presentation", presentation if settings.presentation_position == "end" else 0),
+            ("intro", still - overlap if settings.intro_position == "end" else 0),
+        ]
+        result = {}
+        cursor = 0
+        for name, count in pieces:
+            if count:
+                result[name] = (round(cursor * 1_000_000 / fps),
+                                round((cursor + count) * 1_000_000 / fps))
+            cursor += count
+        return result
+
+    old, new = spans(before), spans(after)
+    result = []
+    for name, (start, end) in old.items():
+        if name not in new:
+            continue
+        new_start, new_end = new[name]
+        for a, b in cuts:
+            left, right = max(a, start), min(b, end)
+            if left < right:
+                a2 = min(new_end, new_start + left - start)
+                b2 = min(new_end, new_start + right - start)
+                if a2 < b2:
+                    result.append((a2, b2))
+    return sorted(result)

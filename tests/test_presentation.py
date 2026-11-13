@@ -74,7 +74,7 @@ def test_render_preview_music_intro_snapshot_and_plan_invalidation(
     make_image(image, (220, 220, 220))
     run_process([discover("ffmpeg"), "-v", "error", "-f", "lavfi", "-i",
                  "sine=frequency=440:duration=4", str(music)])
-    settings = ProjectSettings(preset="speed", intro_image=image, intro_seconds=.5,
+    settings = ProjectSettings(preset="speed", intro_seconds=.5,
                                intro_transition_seconds=.1, music_path=music,
                                presentation_video=clip, presentation_seconds=.5,
                                presentation_position=position)
@@ -87,7 +87,8 @@ def test_render_preview_music_intro_snapshot_and_plan_invalidation(
     make_proxies(root, project)
     output = render(root, project, plan, tmp_path / "export.mp4", encoder="libx264")
     verify_output(output, expected, 30, expected_audio=True)
-    preview = render(root, project, plan, tmp_path / "preview.mp4", preview=True)
+    preview = render(root, project, plan, tmp_path / "preview.mp4", preview=True,
+                     encoder="libx264")
     verify_output(preview, expected, 30, expected_audio=True)
     encoders = [record.getMessage() for record in caplog.records
                 if record.getMessage().startswith("Final video encoder:")]
@@ -152,7 +153,7 @@ def test_inactive_image_is_ignored_and_restored_without_presentation(
         validate_plan(project.model_copy(update={"settings": restored}), plan)
 
 
-def test_replace_intro_rejects_presentation_without_changing_variant(
+def test_replace_intro_with_opening_presentation_adds_ending_cover(
     clips: tuple[Path, Path], tmp_path: Path,
 ) -> None:
     from test_intro import make_image
@@ -170,10 +171,13 @@ def test_replace_intro_rejects_presentation_without_changing_variant(
     save_variant(output, project=project, plan=build_plan(project, [], 1))
     image = tmp_path / "cover.png"
     make_image(image, (220, 220, 220))
-    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
-    with pytest.raises(ValueError, match="Отключите презентацию"):
-        replace_intro(root, output, image, None, encoder="libx264")
-    assert {p: p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
+    before = output.read_bytes()
+    result = replace_intro(root, output, image, None, encoder="libx264")
+    snapshot = Project.model_validate(read_variant(result)["project"])
+    assert snapshot.settings.intro_position == "end"
+    assert snapshot.settings.presentation_video == clip
+    verify_output(result, output_frame_count(snapshot.settings, 30, 30), 30)
+    assert output.read_bytes() == before
 
 
 def test_gui_creation_accepts_missing_inactive_image(
@@ -282,7 +286,8 @@ def test_music_clock_and_manual_cut_match_the_body_after_presentation(
     _, clip = clips
     settings = ProjectSettings(preset="shorts", presentation_video=clip,
                                presentation_position=position, presentation_seconds=5,
-                               intro_image=tmp_path / "missing-cover.png",
+                               intro_image=(tmp_path / "missing-cover.png"
+                                            if position == "start" else None),
                                music_path=clip, beat_sync_enabled=True)
     project = Project(sources=[make_source(0, 0, 120_000_000)], settings=settings)
     plan = build_plan(project, [], 60)
@@ -364,17 +369,18 @@ def test_gui_assign_cancel_save_restore_and_session(
         window.sources.setCurrentRow(1)
         window.presentation_button.click()
         assert window.presentation_video is None and window.sources.count() == 2
+        assert window.intro_image.text() == str(image)  # Cancel preserves the cover.
         QTimer.singleShot(20, lambda: configure(True))
         window.presentation_button.click()
         assert window.presentation_video == clip.resolve()
-        assert window.intro_image.text() == str(image)
-        assert not window.intro_image.isEnabled()
-        assert not window.intro_preview.isEnabled()
+        assert window.intro_image.text() == ""
+        assert window.intro_image.isEnabled()
+        assert window.intro_preview.isEnabled()
         assert not window.change_intro_button.isEnabled()
-        assert window.intro_label.text() == "Заставка · не используется"
+        assert window.intro_label.text() == "Заставка"
         window.language_button.click()
-        assert window.intro_label.text() == "Intro image · not used"
-        assert "Turn it off" in window.intro_image.toolTip()
+        assert window.intro_label.text() == "Intro"
+        assert window.intro_settings_button.isEnabled()
         window.language_button.click()
         assert window.source_paths() == [body.resolve()]
         assert window.listed_source_paths() == [body.resolve(), clip.resolve()]
@@ -392,8 +398,8 @@ def test_gui_assign_cancel_save_restore_and_session(
         assert window.job is None and not window.last_error
         saved = load_project(root)
         assert saved.settings.presentation_video == clip.resolve()
-        assert saved.settings.intro_image == image
-        assert not window.intro_image.isEnabled()  # Job completion must keep priority.
+        assert saved.settings.intro_image is None
+        assert window.intro_image.isEnabled()
         assert saved.settings.presentation_seconds == 6
         assert saved.settings.presentation_position == "end"
         assert saved.settings.presentation_source_index == 1
@@ -402,7 +408,7 @@ def test_gui_assign_cancel_save_restore_and_session(
         window.restore_presentation(ProjectSettings())
         window.open_project_folder(root)
         assert window.presentation_video == clip.resolve()
-        assert window.intro_image.text() == str(image) and not window.intro_image.isEnabled()
+        assert window.intro_image.text() == "" and window.intro_image.isEnabled()
         assert window.listed_source_paths() == [body.resolve(), clip.resolve()]
         video = root / "renders" / "version.mp4"
         video.write_bytes(body.read_bytes())
@@ -428,7 +434,7 @@ def test_gui_assign_cancel_save_restore_and_session(
         window.presentation_button.click()
         assert window.presentation_video is None
         assert window.intro_image.isEnabled() and window.intro_preview.isEnabled()
-        assert window.intro_image.text() == str(image)
+        assert window.intro_image.text() == ""
         assert window.intro_label.text() == "Заставка"
         assert window.source_paths() == [body.resolve(), clip.resolve()]
 

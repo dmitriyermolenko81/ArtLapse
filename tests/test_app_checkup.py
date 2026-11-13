@@ -244,6 +244,16 @@ def test_gui_preserves_legacy_single_music_file_when_reopening_and_exporting(
             time.sleep(0.01)
         assert window.job is None
         assert window.last_error == ""
+        preview = root / "previews" / "legacy_speed.mp4"
+        verify_output(preview, 30, 30, expected_audio=True)
+        assert read_variant(preview)["plan"]["settings"]["draft"]
+        assert not list((root / "renders").glob("*.mp4"))
+        window.export_button.click()
+        deadline = time.monotonic() + 30
+        while window.job is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert window.job is None and window.last_error == ""
         verify_output(root / "renders" / "legacy_speed.mp4", 30, 30, expected_audio=True)
         assert load_project(root).settings.music_path == music
         assert load_project(root).settings.music_folder is None
@@ -272,7 +282,7 @@ def test_gui_remusic_uses_selected_variant_and_reports_its_job(tmp_path: Path) -
     video = root / "renders" / "selected_shorts.mp4"
     make_video(video)
     before = fingerprint(video)
-    save_variant(video, project=snapshot_project)
+    save_variant(video, project=snapshot_project, plan=build_plan(snapshot_project, [], 2))
     folder = tmp_path / "music"
     folder.mkdir()
     run_process([

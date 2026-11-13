@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import Event
 
 from sculptcut.media import Cancelled
-from sculptcut.music_beats import beat_profile, foreground_accents
+from sculptcut.music_beats import beat_dynamics, foreground_accents
 from sculptcut.project import atomic_write
 
 
@@ -16,6 +16,20 @@ from sculptcut.project import atomic_write
 class MusicEvent:
     time_seconds: float
     strength: float
+    accent_strength: float = 0.0
+
+
+@dataclass(frozen=True)
+class CutDensitySettings:
+    activity_window_seconds: float = 2.0
+    quiet_threshold: float = 0.45
+    energetic_threshold: float = 0.85
+    quiet_multiplier: int = 2
+    energetic_multiplier: float = 0.5
+    strong_accent_threshold: float = 0.8
+
+
+DENSITY = CutDensitySettings()
 
 
 @dataclass(frozen=True)
@@ -38,7 +52,7 @@ def analyze_music(
         raise ValueError(f"Music file does not exist: {path}")
     stat = path.stat()
     key_data = (
-        f"continuous-beats-3|{path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}|"
+        f"continuous-beats-4-dynamics|{path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}|"
         f"{duration_seconds:.6f}|{loop}"
     )
     key = hashlib.sha256(key_data.encode("utf-8")).hexdigest()
@@ -55,16 +69,16 @@ def analyze_music(
             cached_path.unlink(missing_ok=True)
     if cancel and cancel.is_set():
         raise Cancelled("Music beat analysis cancelled")
-    beats_raw = beat_profile(path, duration_seconds, loop, cancel)
+    beats_raw = beat_dynamics(path, duration_seconds, loop, cancel)
     if cancel and cancel.is_set():
         raise Cancelled("Music beat analysis cancelled")
     onsets_raw = foreground_accents(path, duration_seconds, loop, cancel)
-    beat_times = [time for time, _ in beats_raw]
+    beat_times = [time for time, _, _ in beats_raw]
     gaps = [right - left for left, right in zip(beat_times, beat_times[1:], strict=False)]
     tempo = 60 / sorted(gaps)[len(gaps) // 2] if gaps else 0.0
     analysis = MusicAnalysis(
         tempo_bpm=tempo,
-        beats=tuple(MusicEvent(time, strength) for time, strength in beats_raw),
+        beats=tuple(MusicEvent(time, activity, accent) for time, activity, accent in beats_raw),
         onsets=tuple(MusicEvent(time, strength) for time, strength in onsets_raw),
     )
     atomic_write(
@@ -101,13 +115,16 @@ def select_cut_beats(
         return []
     sampled: list[MusicEvent] = []
     next_index = 0
+    activities = section_activity(analysis.beats)
     for index, beat in enumerate(analysis.beats):
-        if index < next_index:
+        if index < next_index and beat.accent_strength < DENSITY.strong_accent_threshold:
             continue
         period = local_beat_period(analysis.beats, index)
         step = beats_per_cut
-        if beat.strength < 0.45:
-            step *= 2  # Quiet sections keep a still for whole numbers of beats.
+        if activities[index] < DENSITY.quiet_threshold:
+            step *= DENSITY.quiet_multiplier
+        elif activities[index] >= DENSITY.energetic_threshold:
+            step = max(1, round(step * DENSITY.energetic_multiplier))
         step = max(step, math.ceil(min_interval / period))
         while step > 1 and step * period > max_interval:
             step = max(1, step // 2)
@@ -132,7 +149,9 @@ def select_cut_beats(
         )
         if selected and event.time_seconds - selected[-1].time_seconds < interval:
             if event in phrase_events or (
-                selected[-1] not in phrase_events and event.strength > selected[-1].strength
+                selected[-1] not in phrase_events
+                and (event.accent_strength, event.strength)
+                > (selected[-1].accent_strength, selected[-1].strength)
             ):
                 selected[-1] = event
         else:
@@ -157,6 +176,23 @@ def select_cut_beats(
             filled.append(next_event)
         filled.append(event)
     return filled
+
+
+def section_activity(beats: tuple[MusicEvent, ...]) -> list[float]:
+    """A rolling section mean prevents one loud beat from making a quiet passage busy."""
+    prefix = [0.0]
+    for beat in beats:
+        prefix.append(prefix[-1] + beat.strength)
+    left = right = 0
+    result = []
+    radius = DENSITY.activity_window_seconds / 2
+    for beat in beats:
+        while left < len(beats) and beats[left].time_seconds < beat.time_seconds - radius:
+            left += 1
+        while right < len(beats) and beats[right].time_seconds <= beat.time_seconds + radius:
+            right += 1
+        result.append((prefix[right] - prefix[left]) / max(1, right - left))
+    return result
 
 
 def local_beat_period(beats: tuple[MusicEvent, ...], index: int) -> float:

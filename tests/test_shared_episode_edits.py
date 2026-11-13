@@ -14,14 +14,14 @@ from sculptcut.episode_editor import edit_episode
 from sculptcut.episode_timeline import trim_episode
 from sculptcut.fixtures import generate_fixture
 from sculptcut.media import discover, run_process
-from sculptcut.overrides import apply_overrides, exclude_dropped
+from sculptcut.overrides import exclude_dropped
 from sculptcut.planning import RenderPlan, build_plan, plan_project, validate_plan
 from sculptcut.project import create_project, load_project, save_project
 from sculptcut.rendering import render, verify_output
 from sculptcut.ui import MainWindow
 
 
-def test_shared_edits_cross_all_presets_with_simple_speed_exception(tmp_path: Path) -> None:
+def test_shared_edits_cross_all_presets_including_simple_speed(tmp_path: Path) -> None:
     video = tmp_path / "drawing.mp4"
     run_process([
         discover("ffmpeg"), "-v", "error", "-f", "lavfi", "-i",
@@ -65,20 +65,15 @@ def test_shared_edits_cross_all_presets_with_simple_speed_exception(tmp_path: Pa
         plan = plan_project(root, project, 4)
         validate_plan(project, plan)
         assert load_project(root).overrides == rules
-        if preset == "speed":
-            assert all(d.action == "SPEED" for d in plan.decisions)
-            assert sum(d.source_end_us - d.source_start_us for d in plan.decisions) == 12_000_000
-            assert apply_overrides(project, plan) == plan
-        else:
-            for d in plan.decisions:
-                if d.action != "DROP":
-                    assert not any(
-                        o.action == "DROP" and o.source_id == d.source_id
-                        and o.start_us < d.source_end_us and o.end_us > d.source_start_us
-                        for o in rules
-                    ), (preset, d)
-            if preset in ("timelapse", "shorts", "music_shorts", "photoshop_shorts"):
-                assert any(d.provenance == "user:SET_SPEED" for d in plan.decisions)
+        for d in plan.decisions:
+            if d.action != "DROP":
+                assert not any(
+                    o.action == "DROP" and o.source_id == d.source_id
+                    and o.start_us < d.source_end_us and o.end_us > d.source_start_us
+                    for o in rules
+                ), (preset, d)
+        if preset in ("timelapse", "shorts", "music_shorts", "photoshop_shorts", "speed"):
+            assert any(d.provenance == "user:SET_SPEED" for d in plan.decisions)
         assert plan_project(root, project, 4) == plan
         if preset in ("timelapse", "photoshop_beat_shorts"):
             output = render(root, project, plan, tmp_path / f"{preset}.mp4", encoder="libx264")
@@ -124,7 +119,7 @@ def test_gui_export_remembers_episode_rules_after_speed_mode(tmp_path: Path) -> 
             assert not window.last_error, window.last_error
             assert load_project(root).overrides == rules
             plan = RenderPlan.model_validate_json((root / "render_plan.json").read_text("utf-8"))
-            assert any(d.action == "DROP" for d in plan.decisions) == (preset != "speed")
+            assert any(d.action == "DROP" for d in plan.decisions)
     finally:
         if window.job is not None:
             window.job.cancel.set()

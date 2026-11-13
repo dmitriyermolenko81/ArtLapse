@@ -4,12 +4,17 @@ import math
 from collections.abc import Callable
 from threading import Event
 
+import numpy as np
+from numpy.typing import NDArray
+
 from sculptcut.budget import distribute
 from sculptcut.domain import Project, SourceMedia
 from sculptcut.media import Cancelled
 from sculptcut.music_episodes import SETTINGS
 from sculptcut.photoshop_story import STORY
 from sculptcut.planning import RenderDecision, RenderPlan, validate_plan
+from sculptcut.visual_transitions import SETTINGS as TRANSITIONS
+from sculptcut.visual_transitions import choose_distinct_view, unlocked_window
 
 
 def photoshop_music_plan(
@@ -19,6 +24,7 @@ def photoshop_music_plan(
     score_window: Callable[[SourceMedia, int, int], float],
     cancel: Event | None = None,
     progress: Callable[[float], None] | None = None,
+    *, view_signature: Callable[[SourceMedia, int], NDArray[np.uint8] | None] | None = None,
 ) -> RenderPlan:
     """Choose disjoint source windows; never turn an episode into a still or slow motion."""
     spans: list[tuple[int, int, int]] = []
@@ -42,6 +48,7 @@ def photoshop_music_plan(
     sources = {source.id: source for source in project.sources}
     origins = {index: start for start, _, index in spans}
     windows: dict[int, list[tuple[int, int, int]]] = {}
+    previous_view: NDArray[np.uint8] | None = None
     # Chapters use retained work time. Source exclusions cannot reappear or consume a chapter.
     for shot, (left_frame, right_frame) in enumerate(zip(grid, grid[1:], strict=False)):
         if cancel and cancel.is_set():
@@ -55,8 +62,12 @@ def photoshop_music_plan(
                 (right_frame - left_frame) * STORY.max_speed * 1_000_000 // fps),
         )
         options: list[tuple[float, int, int, int]] = []
-        for part in range(STORY.candidates):
-            position = left + (right - left) * (2 * part + 1) // (2 * STORY.candidates)
+        positions = [(a+b)//2 for a, b, _ in available]
+        if (not base.settings.get("complete_short_catalogue")
+                or base.settings.get("short_catalogue_fallback")):
+            positions = [left + (right-left)*(2*part+1)//(2*STORY.candidates)
+                         for part in range(STORY.candidates)]
+        for position in positions:
             a, b, index = next((span for span in available if span[0] <= position < span[1]),
                                max(available, key=lambda span: span[1] - span[0]))
             if shot == count - 1:
@@ -74,7 +85,29 @@ def photoshop_music_plan(
             options.append((score + penalty, index, source_start, source_end))
             if shot == count - 1:
                 break
-        _, index, start, end = min(options)
+        selected_index = min(range(len(options)), key=lambda i: options[i])
+        baseline = options[selected_index]
+        if view_signature is not None and unlocked_window(
+            project, base.decisions[baseline[1]].source_id, baseline[2], baseline[3],
+        ):
+            def opening(i: int, rows: list[tuple[float, int, int, int]] = options
+                        ) -> NDArray[np.uint8] | None:
+                row = rows[i]
+                return view_signature(sources[base.decisions[row[1]].source_id], row[2])
+
+            def eligible(i: int, rows: list[tuple[float, int, int, int]] = options,
+                         original: tuple[float, int, int, int] = baseline) -> bool:
+                row = rows[i]
+                return (row[3] - row[2] == original[3] - original[2]
+                        and unlocked_window(project, base.decisions[row[1]].source_id,
+                                            row[2], row[3]))
+
+            selected_index = choose_distinct_view([1 / (1 + max(0, row[0])) for row in options],
+                                                  opening, previous_view, selected_index, eligible)
+        _, index, start, end = options[selected_index]
+        if view_signature is not None:
+            previous_view = view_signature(sources[base.decisions[index].source_id],
+                                           max(start, end - TRANSITIONS.tail_us))
         windows.setdefault(index, []).append((start, end, right_frame - left_frame))
         if progress:
             progress((shot + 1) / count)

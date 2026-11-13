@@ -22,6 +22,7 @@ from sculptcut.domain import Project
 from sculptcut.planning import RenderDecision, RenderPlan, validate_plan
 from sculptcut.screen_cleanup import project_screens
 from sculptcut.segmentation import Segment
+from sculptcut.visual_transitions import choose_distinct_view, unlocked_window
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,35 @@ class StorySettings:
 
 
 STORY = StorySettings()
+
+Choice = tuple[float, int, int, int]
+VettedChoice = tuple[Choice, NDArray[np.uint8] | None, DevelopmentEvidence]
+
+
+def _distinct_episode(
+    rows: list[VettedChoice], best: Choice, decisions: list[RenderDecision],
+    previous: NDArray[np.uint8], signature: Callable[[str, int], NDArray[np.uint8] | None],
+    can_replace: Callable[[str, int, int], bool] | None,
+) -> VettedChoice:
+    preferred = next(i for i, row in enumerate(rows) if row[0] == best)
+    if (can_replace is not None
+            and not can_replace(decisions[-best[1]].source_id, -best[2], best[3])):
+        return rows[preferred]
+
+    def opening(index: int) -> NDArray[np.uint8] | None:
+        row = rows[index][0]
+        return signature(decisions[-row[1]].source_id, -row[2])
+
+    def eligible(index: int) -> bool:
+        row = rows[index][0]
+        return (row[3] + row[2] == best[3] + best[2]
+                and (can_replace is None or can_replace(
+                    decisions[-row[1]].source_id, -row[2], row[3],
+                )))
+
+    selected = choose_distinct_view([row[0][0] for row in rows], opening, previous,
+                                    preferred, eligible)
+    return rows[selected]
 
 
 def work_chapters(
@@ -95,10 +125,14 @@ def readable_episodes(
     development: DevelopmentScorer | None = None,
     chapter_count: int = STORY.chapters,
     episode_lengths_us: list[int] | None = None,
+    *,
+    prefer_distinct: bool = False,
+    can_replace: Callable[[str, int, int], bool] | None = None,
 ) -> list[RenderDecision]:
     """Keep one continuous work episode per temporal chapter, without micro-cuts."""
     chosen: dict[int, tuple[int, int]] = {}
     prior_views: list[NDArray[np.uint8]] = []
+    previous_end: NDArray[np.uint8] | None = None
     prior_states: dict[str, DevelopmentEvidence] = {}
     for chapter in range(chapter_count):
         best: tuple[float, int, int, int] | None = None
@@ -145,9 +179,8 @@ def readable_episodes(
         if visual_score is not None and candidates:
             # Check both high-scoring work and alternatives across the chapter;
             # equal activity scores must not always choose the first seconds.
-            ranked = sorted(candidates, reverse=True)[: STORY.visual_candidates]
-            step = max(1, len(candidates) // STORY.visual_candidates)
-            shortlist = sorted(set(ranked + candidates[::step]), reverse=True)
+            shortlist = sorted(set(candidates), reverse=True)
+            evaluated: list[VettedChoice] = []
             for score, index, start, end in shortlist:
                 quality = visual_score(decisions[-index].source_id, -start, end)
                 if quality <= 0:
@@ -174,15 +207,22 @@ def readable_episodes(
                 )
                 quality *= development_weight(evidence, prior_states.get(source_id))
                 candidate = (score * quality, index, start, end)
+                evaluated.append((candidate, view, evidence))
                 if best is None or candidate > best:
                     best = candidate
                     best_view = view
                     best_evidence = evidence
+            if (prefer_distinct and visual_signature is not None
+                    and previous_end is not None and best is not None):
+                best, best_view, best_evidence = _distinct_episode(
+                    evaluated, best, decisions, previous_end, visual_signature, can_replace,
+                )
         elif candidates:
             best = max(candidates)
         if best is not None:
             chosen[-best[1]] = (-best[2], best[3])
             prior_states[decisions[-best[1]].source_id] = best_evidence
+            previous_end = best_view
             if best_view is not None:
                 prior_views.append(best_view)
     result: list[RenderDecision] = []
@@ -217,6 +257,11 @@ def process_plan(
     segments: list[Segment],
     cancel: Event | None = None,
 ) -> RenderPlan:
+    if (base.settings.get("complete_short_catalogue")
+            and not base.settings.get("short_catalogue_fallback")):
+        from sculptcut.short_catalogue import catalogue_process_plan
+
+        return catalogue_process_plan(root, project, base)
     from sculptcut.sculpt_only import final_start
 
     fps = base.output_fps
@@ -231,11 +276,17 @@ def process_plan(
         STORY.final_seconds * 1_000_000,
         math.ceil((music_grid[-1] - music_grid[-2]) * 1_000_000 / fps) if music_grid else 0,
     ), last.duration_us)
-    final = final_start(root, project, last, final_length, cancel)
+    if music_grid:
+        # The automatic finale must leave at least one output frame for the work.
+        final_length = min(final_length,
+                           ((base.target_frame_count - 1) * 1_000_000 + fps - 1) // fps)
+    final = final_start(root, project, last, final_length, cancel) if final_length > 0 else None
     final_end = min(last.duration_us, final + final_length) if final is not None else 0
     decisions: list[RenderDecision] = []
     for source in project.sources:
         rejected = [(r.start_us, r.end_us) for r in screens if r.source_id == source.id]
+        rejected += [(d.source_start_us, d.source_end_us) for d in base.decisions
+                     if d.source_id == source.id and d.action == "DROP"]
         rejected += [
             (s.start_us, s.end_us)
             for s in segments
@@ -321,9 +372,14 @@ def process_plan(
         work_us = sum(d.source_end_us - d.source_start_us for d in decisions
                       if d.provenance == "user:process_story")
         if music_grid:
-            slots = music_grid[:-1] if any(
-                d.action != "DROP" and d.provenance == "user:shorts_final" for d in decisions
-            ) else music_grid
+            final_frames = sum(
+                max(1, (d.source_end_us - d.source_start_us) * fps // 1_000_000)
+                for d in decisions if d.action != "DROP" and d.provenance == "user:shorts_final"
+            )
+            # The last beat slot may be much shorter than the four-second finale.
+            # Size source windows against the actual remaining work budget.
+            work_end = base.target_frame_count - final_frames
+            slots = [frame for frame in music_grid if frame < work_end] + [work_end]
             chapter_count = max(1, min(
                 len(slots) - 1, work_us * fps // 1_000_000,
             ))
@@ -346,11 +402,16 @@ def process_plan(
     from sculptcut.shorts_quality import EpisodeInspector
 
     with EpisodeInspector(root, project, cancel) as inspector:
+        def can_replace(source_id: str, start: int, end: int) -> bool:
+            return unlocked_window(project, source_id, start, end)
+
         decisions = readable_episodes(
             decisions, chapters, segments, inspector.score, inspector.signature,
             inspector.development,
             chapter_count,
             episode_lengths,
+            prefer_distinct=project.settings.preset == "music_shorts",
+            can_replace=can_replace,
         )
         development_weights = chronological_weights(
             ((d.source_id, d.source_start_us, d.source_end_us) for d in decisions

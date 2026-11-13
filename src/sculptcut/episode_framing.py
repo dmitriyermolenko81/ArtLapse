@@ -61,7 +61,8 @@ def frame_restored_episodes(
              or (music_process and d.subject_camera is not None
                  and (d.subject_camera.height > d.subject_camera.viewport.height
                       or d.subject_camera.width > d.subject_camera.viewport.width)))
-        and d.provenance in ("user:KEEP", "user:RETAIN", "user:SET_SPEED", "user:FORCE_MONTAGE")
+        and d.provenance in ("user:KEEP", "user:RETAIN", "user:SET_SPEED", "user:FORCE_MONTAGE",
+                             "user:restored_work")
         and any(old.source_id == d.source_id and old.source_start_us <= d.source_start_us
                 and old.source_end_us >= d.source_end_us for old in dropped)
     }

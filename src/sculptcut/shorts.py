@@ -39,6 +39,9 @@ class CameraStability:
     duplicate_combined_width_fraction: float = 0.7
     duplicate_min_area_ratio: float = 0.5
     duplicate_max_overlap_fraction: float = 0.03
+    panel_min_span: float = 0.9
+    panel_max_depth: float = 0.2
+    viewport_edge_tolerance_pixels: int = 2
 
 
 CAMERA_STABILITY = CameraStability()
@@ -244,6 +247,78 @@ def viewport_box(gray: Gray) -> Roi | None:
     x, y, w, h, _ = bounds
     height, width = gray.shape
     return Roi(x=x / width, y=y / height, width=w / width, height=h / height)
+
+
+def tracking_viewport(gray: Gray, measured: Roi, reference: Roi | None) -> Roi:
+    """Accept an inward canvas edge only when a thin UI panel explains it.
+
+    A close-up can hide flat background and make its detected bounds shrink.
+    Such foreground extends into the canvas; a toolbar instead spans an edge
+    and ends inside the strip removed by the new canvas measurement.
+    """
+    if reference is None:
+        return measured
+    height, width = gray.shape
+    x, y, right, bottom = pixel_bounds(reference, width, height)
+    mx, my, mr, mb = pixel_bounds(measured, width, height)
+    pixels = gray[my:mb, mx:mr]
+    mode = int(np.bincount((pixels // 4).ravel(), minlength=64).argmax())
+    background = float(np.median(pixels[pixels // 4 == mode]))
+    mask = (np.abs(gray[y:bottom, x:right].astype(np.float32) - background) > 14)
+    mask = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_OPEN,
+                             np.ones((5, 5), dtype=np.uint8))
+    _, _, stats, _ = cv2.connectedComponentsWithStats(mask)
+    w, h = right - x, bottom - y
+    tolerance = CAMERA_STABILITY.viewport_edge_tolerance_pixels
+    span = CAMERA_STABILITY.panel_min_span
+    depth = CAMERA_STABILITY.panel_max_depth
+    edges = [min(reference.x, measured.x), min(reference.y, measured.y),
+             max(reference.x + reference.width, measured.x + measured.width),
+             max(reference.y + reference.height, measured.y + measured.height)]
+    for px, py, pw, ph, _ in stats[1:]:
+        horizontal = pw >= w * span and ph <= h * depth
+        vertical = ph >= h * span and pw <= w * depth
+        if (horizontal and my > y + tolerance and py <= tolerance
+                and py + ph <= my - y + tolerance):
+            edges[1] = measured.y
+        if (horizontal and mb < bottom - tolerance and py + ph >= h - tolerance
+                and py >= mb - y - tolerance):
+            edges[3] = measured.y + measured.height
+        if (vertical and mx > x + tolerance and px <= tolerance
+                and px + pw <= mx - x + tolerance):
+            edges[0] = measured.x
+        if (vertical and mr < right - tolerance and px + pw >= w - tolerance
+                and px >= mr - x - tolerance):
+            edges[2] = measured.x + measured.width
+    for existing in (reference, measured):
+        original = (existing.x, existing.y, existing.x + existing.width,
+                    existing.y + existing.height)
+        if all(abs(a - b) < 1e-12 for a, b in zip(edges, original, strict=True)):
+            return existing
+    return Roi(x=edges[0], y=edges[1], width=edges[2] - edges[0], height=edges[3] - edges[1])
+
+
+def shared_viewport(viewports: list[Roi], subjects: list[Roi]) -> Roi:
+    """Keep one camera inside every observed canvas when the sculpt still fits."""
+    left = max(v.x for v in viewports)
+    top = max(v.y for v in viewports)
+    right = min(v.x + v.width for v in viewports)
+    bottom = min(v.y + v.height for v in viewports)
+    if right > left and bottom > top and all(
+        box.x >= left and box.y >= top
+        and box.x + box.width <= right + 1e-9 and box.y + box.height <= bottom + 1e-9
+        for box in subjects
+    ):
+        return Roi(x=left, y=top, width=right - left, height=bottom - top)
+    # Preserve the existing close-up fallback if no common crop contains the
+    # observed model. A foreground crossing the background must not clip it.
+    left = float(np.median([v.x for v in viewports]))
+    top = float(np.median([v.y for v in viewports]))
+    right = float(np.median([v.x + v.width for v in viewports]))
+    bottom = float(np.median([v.y + v.height for v in viewports]))
+    if right <= left or bottom <= top:
+        raise ValueError("ZBrush viewport moved too far during a shorts shot")
+    return Roi(x=left, y=top, width=right - left, height=bottom - top)
 
 
 def model_box(gray: Gray, viewport: Roi | None = None, previous: Roi | None = None) -> Roi | None:
@@ -655,7 +730,7 @@ def reframe_shorts(
                 )
                 capture = AnalysisCapture(clip, webcam_roi(project.settings, source.id))
                 boxes = []
-                viewports = []
+                viewports: list[Roi] = []
                 samples: list[tuple[int, Roi | None]] = []
                 selected_subject: Roi | None = None
                 backgrounds = []
@@ -704,13 +779,20 @@ def reframe_shorts(
                     # Close-up models can cover half the flat canvas, making
                     # background detection shrink it. Restored clips share the
                     # viewport already verified for nearby original episodes.
-                    viewport = context_viewport or viewport_box(gray)
+                    measured_viewport = viewport_box(gray)
+                    reference = context_viewport or source_viewport or (
+                        viewports[0] if viewports else None
+                    )
+                    viewport = (
+                        tracking_viewport(gray, measured_viewport, reference)
+                        if measured_viewport else reference
+                    )
                     if viewport is None:
                         confident = False
                     else:
                         viewports.append(viewport)
                     box = (
-                        sculpt_footprint(gray, source_viewport or viewport, selected_subject)
+                        sculpt_footprint(gray, viewport, selected_subject)
                         if viewport
                         else None
                     )
@@ -738,20 +820,16 @@ def reframe_shorts(
                         warnings.append(
                             f"Shorts reused viewport: {source.id}@{decision.source_start_us}"
                         )
-                # A foreground crossing the background can split its component;
-                # that must not shrink the viewport and cut the subject itself.
-                left = float(np.median([v.x for v in viewports]))
-                top = float(np.median([v.y for v in viewports]))
-                right = float(np.median([v.x + v.width for v in viewports]))
-                bottom = float(np.median([v.y + v.height for v in viewports]))
-                if right <= left or bottom <= top:
-                    raise ValueError("ZBrush viewport moved too far during a shorts shot")
-                viewport = Roi(x=left, y=top, width=right - left, height=bottom - top)
+                viewport = shared_viewport(viewports, boxes)
                 if source_viewport and (
                     abs(viewport.x - source_viewport.x) < 0.025
                     and abs(viewport.y - source_viewport.y) < 0.025
                     and abs(viewport.width - source_viewport.width) < 0.05
                     and abs(viewport.height - source_viewport.height) < 0.05
+                    and source_viewport.x >= viewport.x
+                    and source_viewport.y >= viewport.y
+                    and source_viewport.x + source_viewport.width <= viewport.x + viewport.width
+                    and source_viewport.y + source_viewport.height <= viewport.y + viewport.height
                 ):
                     viewport = source_viewport
                 if not full_frame_fallback:

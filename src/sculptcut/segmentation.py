@@ -7,12 +7,17 @@ from threading import Event
 
 from pydantic import Field
 
-from sculptcut.activity import Activity, Kind, classify_project
+from sculptcut.activity import Activity, Kind, activity_key, classify_project
 from sculptcut.analysis import analysis_key
 from sculptcut.domain import Model, Project
-from sculptcut.project import atomic_write, cache_key, database
+from sculptcut.project import atomic_write, cache_get, cache_key, cache_put, database
 
-SEGMENT_VERSION = "segmentation-2-weighted-evidence"
+SEGMENT_VERSION = "segmentation-3-local-detail-guard"
+
+
+def segment_key(project: Project, source_id: str) -> str:
+    source = next(s for s in project.sources if s.id == source_id)
+    return cache_key(SEGMENT_VERSION, activity_key(project, source), source.duration_us)
 
 
 def _merge_components(
@@ -133,22 +138,29 @@ def segment_activity(
 def segment_project(root: Path, project: Project, cancel: Event | None = None) -> list[Segment]:
     classify_project(root, project, cancel)
     connection = database(root)
-    result = []
+    result: list[Segment] = []
     try:
         for source in project.sources:
-            key = cache_key("activity-3-perceptual-stability", analysis_key(project, source))
+            complete = cache_get(root, 'features', source.id, analysis_key(project, source))
+            cached = cache_get(root, 'segments', source.id, segment_key(project, source.id))
+            if complete is not None and cached is not None:
+                result.extend(Segment.model_validate(row) for row in cached)
+                continue
+            key = activity_key(project, source)
             rows = connection.execute(
                 "SELECT value FROM activity WHERE source_id=? AND key=? ORDER BY timestamp",
                 (source.id, key),
             )
-            result.extend(
-                segment_activity(
+            segments = segment_activity(
                     (Activity.model_validate_json(row[0]) for row in rows),
                     source.id,
                     source.duration_us,
                     round(1_000_000 / project.settings.proxy_fps),
                 )
-            )
+            result.extend(segments)
+            if complete is not None:
+                cache_put(root, 'segments', source.id, segment_key(project, source.id),
+                          [s.model_dump() for s in segments])
     finally:
         connection.close()
     atomic_write(root / "segments.json", json.dumps([s.model_dump() for s in result], indent=2))

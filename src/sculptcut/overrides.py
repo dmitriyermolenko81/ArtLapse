@@ -1,16 +1,26 @@
 """Non-destructive user decisions applied only to the render plan."""
 
 import math
+from collections.abc import Sequence
 
 from sculptcut.budget import distribute
-from sculptcut.domain import Project
+from sculptcut.domain import Override, Project
 from sculptcut.planning import RenderDecision, RenderPlan, validate_plan
 
 
-def apply_overrides(project: Project, plan: RenderPlan, *, manual: bool = False) -> RenderPlan:
-    if not project.overrides or (project.settings.preset == "speed" and not manual):
+def apply_overrides(
+    project: Project, plan: RenderPlan, *, manual: bool = False,
+    inherited_speeds: Sequence[Override] = (),
+    bounded_restores: bool = False,
+) -> RenderPlan:
+    if not project.overrides:
         return plan
     stills = plan.settings.get("story") in ("beat_stills", "photoshop_beat_stills")
+    musical = (not stills
+               and project.settings.preset in ("music_shorts", "photoshop_music_shorts")
+               and bool(plan.settings.get("story")))
+    episodic = (musical or plan.settings.get("story") == "phrased_timelapse"
+                or bool(plan.settings.get("complete_short_catalogue")))
     pieces: list[RenderDecision] = []
     minimum, maximum, preferred = [], [], []
     fps = plan.output_fps
@@ -24,8 +34,21 @@ def apply_overrides(project: Project, plan: RenderPlan, *, manual: bool = False)
             # Output trims are an independent exclusion layer. An episode's
             # speed/keep override must never resurrect an already cut interval.
             and decision.provenance != "user:shorts_manual_cut"
+            and not (decision.provenance == "auto:budget_omission"
+                     and o.action == "SET_SPEED" and not o.restore_omitted)
+            # Speed controls do not mean "return all omitted source footage" in
+            # a newly selected musical montage. Explicit episode edits still can.
+            and not (episodic and decision.action == "DROP" and o.action == "SET_SPEED"
+                     and ((not manual and not o.exact_selection) or (not o.restore_omitted and any(
+                         old.source_id == o.source_id and old.start_us <= o.start_us
+                         and o.end_us <= old.end_us and old.speed == o.speed
+                         for old in inherited_speeds
+                     ))))
             # Still frames have no playback speed; keep their musical duration.
             and (not stills or o.action == "DROP")
+            # A verified final hold also has display time, not playback speed.
+            # Reapplying a broad speed rule must not shorten that presentation.
+            and not (decision.action == "HOLD" and o.action == "SET_SPEED")
         ]
         bounds = sorted(
             {decision.source_start_us, decision.source_end_us}
@@ -37,20 +60,21 @@ def apply_overrides(project: Project, plan: RenderPlan, *, manual: bool = False)
         )
         for start, end in zip(bounds, bounds[1:], strict=False):
             override = next((o for o in relevant if o.start_us <= start and end <= o.end_us), None)
-            count = max(
-                1,
-                round(
-                    decision.output_frame_count
-                    * (end - start)
-                    / (decision.source_end_us - decision.source_start_us)
-                ),
-            )
+            from sculptcut.timewarp import output_before
+
+            count = max(1,output_before(decision,end)-output_before(decision,start)
+                        if decision.speed_ramp is not None else round(
+                            decision.output_frame_count*(end-start)/(
+                                decision.source_end_us-decision.source_start_us)))
             cap = max(1, math.floor((end - start) * fps / 1e6))
             action = decision.action
             fixed = decision.provenance == "user:final_tail" or decision.action == "HOLD"
             provenance = decision.provenance
+            speed_ceiling = None
             if override:
                 provenance = f"user:{override.action}"
+                if decision.provenance == "auto:budget_episode" and override.action == "SET_SPEED":
+                    provenance = decision.provenance
                 fixed = True
                 if override.action == "FORCE_MONTAGE":
                     action = "SPEED"
@@ -62,6 +86,12 @@ def apply_overrides(project: Project, plan: RenderPlan, *, manual: bool = False)
                     action, fixed = "SPEED", False
                 elif override.action == "SET_SPEED":
                     action, count = "SPEED", max(1, math.floor(cap / override.speed))
+                    if (bounded_restores and override.restore_omitted
+                            and not override.exact_selection):
+                        provenance = "user:restored_work"
+                        fixed = False
+                        speed_ceiling = override.speed
+                        count = max(1, math.ceil(cap / override.speed))
             if action == "DROP":
                 count = 0
             if action == "HOLD":
@@ -74,10 +104,28 @@ def apply_overrides(project: Project, plan: RenderPlan, *, manual: bool = False)
                         "action": action,
                         "output_frame_count": count,
                         "provenance": provenance,
+                        "speed_ramp":None if override is not None else decision.speed_ramp,
                     }
                 )
             )
-            minimum.append(count if fixed or action == "DROP" else max(1, math.ceil(cap / 32)))
+            if fixed or action == "DROP":
+                low = count
+            elif musical:
+                from sculptcut.music_episodes import episode_speed_limit
+
+                low = min(cap, max(1, math.ceil(cap / episode_speed_limit(project)),
+                                   math.ceil(cap / speed_ceiling) if speed_ceiling else 1,
+                                   math.ceil(project.settings.beat_sync_min_shot_seconds * fps)))
+            elif plan.settings.get("story") == "phrased_timelapse":
+                limit = (project.settings.timelapse_bridge_max_speed
+                         if provenance in ("story:process_bridge", "story:phrase_context")
+                         else project.settings.timelapse_episode_max_speed)
+                low = min(cap, max(1, math.ceil(cap/limit),
+                                   math.ceil(cap/speed_ceiling) if speed_ceiling else 1))
+            else:
+                low = max(1, math.ceil(cap / 32),
+                          math.ceil(cap / speed_ceiling) if speed_ceiling else 1)
+            minimum.append(low)
             maximum.append(count if fixed or action == "DROP" else cap)
             preferred.append(float(max(1, count)))
     actual = max(sum(minimum), min(sum(maximum), plan.target_frame_count))

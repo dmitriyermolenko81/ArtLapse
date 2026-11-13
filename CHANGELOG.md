@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.3 — 2026-11-13
+
+- One source episode catalogue for every mode; modes choose different excerpts from it.
+- Shared manual source corrections and reusable completed analysis, with cache status.
+- Compact video and music timelines inside the main window, with independent edits.
+- Real audio waveforms inside music clips, loaded in the background and cached.
+- Split, trim and delete music sections without overwriting the following clips.
+- Optional fade-in and fade-out curves added from the clip's right-click menu.
+- Hover shortcuts: Q to split, Delete to remove, Ctrl+Z / Ctrl+Y to undo / redo.
+- Space to play or pause, with protection while typing, dragging or using dialogs.
+- Music editing is locked for beat-synced versions to preserve their timing.
+- Playback starts at the beginning, including the intro or presentation.
+- Refined audio preview synchronization and modern scrollbars, including version lists.
+- Remove obsolete still-frame-to-music presets from the selector; retain legacy project support.
+
+
 ## 0.1.2 — 2026-10-25
 
 - Keep SDR exports in consistently converted and tagged BT.709 limited range.

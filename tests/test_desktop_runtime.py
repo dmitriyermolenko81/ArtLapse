@@ -24,6 +24,7 @@ def test_portable_tools_and_state_follow_moved_folder(
     (root / "bin/ffmpeg.exe").write_bytes(b"test executable path")
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", str(root / "ArtLapse.exe"))
+    monkeypatch.delenv("ARTLAPSE_DATA_DIR", raising=False)
     monkeypatch.delenv("SCULPTCUT_DATA_DIR", raising=False)
     monkeypatch.setenv("SCULPTCUT_FFMPEG", str(tmp_path / "missing.exe"))
     assert portable_root() == root
@@ -44,6 +45,7 @@ def test_runtime_logs_in_configured_unicode_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = tmp_path / "данные приложения"
+    monkeypatch.delenv("ARTLAPSE_DATA_DIR", raising=False)
     monkeypatch.setenv("SCULPTCUT_DATA_DIR", str(root))
     logger = configure_logging(io.StringIO())
     logger.info("Запуск", extra={"event": "startup"})

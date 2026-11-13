@@ -53,7 +53,6 @@ from sculptcut.episode_playback import EpisodePlayback
 from sculptcut.episode_timeline import EpisodeTimeline
 from sculptcut.i18n import tr
 from sculptcut.intro import output_frame_count
-from sculptcut.overrides import apply_overrides
 from sculptcut.planning import RenderDecision, RenderPlan, validate_plan
 from sculptcut.playback_volume import PlaybackVolume, VolumeControl
 from sculptcut.project import load_project
@@ -89,7 +88,9 @@ def episode_export(
         except (OSError, ValueError):
             continue
     validate_plan(project, base)
-    return project, apply_overrides(project, base, manual=True)
+    from sculptcut.combined_edits import apply_episode_edits
+
+    return project, apply_episode_edits(project, base, root=root)
 
 
 class EpisodeCardDelegate(QStyledItemDelegate):
@@ -168,7 +169,7 @@ class EpisodePanel(QDialog):
         help_text = (
             tr("Пробел — просмотр, светлые ручки — границы, ПКМ — действия.\n"
             "Колесо — масштаб, Shift+колесо — сдвиг. Правки сохраняются в проекте. "
-            "Готовое видео обновит «Создать исправленную копию».")
+            "Результат покажет «Обновить предпросмотр». Экспорт — в главном окне.")
         )
         self.summary = QLabel()
         self.summary.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
@@ -326,7 +327,7 @@ class EpisodePanel(QDialog):
         actions.addWidget(self.undo_button)
         actions.addWidget(self.redo_button)
         actions.addWidget(self.message, 1)
-        self.export_button = QPushButton(tr("Создать исправленную копию"))
+        self.export_button = QPushButton(tr("Обновить предпросмотр"))
         self.export_button.setObjectName("primary")
         self.export_button.setToolTip(
             tr("Использует длительность, музыку и рамку сохранённого монтажа")

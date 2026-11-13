@@ -31,6 +31,8 @@ from sculptcut.video_color import SDR_ENCODER_ARGS, SDR_FILTER
 # Encode intermediates with more detail than the final delivery encode.
 INTERMEDIATE_QUALITY = 16
 FINAL_CRF = 18
+FILTER_THREADS = 2
+ORIGINAL_QUALITY_PREVIEW = True
 
 
 def export_size(project: Project, plan: RenderPlan | None = None) -> tuple[int, int]:
@@ -145,6 +147,8 @@ def _normalize(
             "error",
             "-nostdin",
             "-xerror",
+            "-filter_threads", str(FILTER_THREADS),
+            "-filter_complex_threads", str(FILTER_THREADS),
             "-reinit_filter",
             "0",
             "-i",
@@ -204,6 +208,8 @@ def verify_output(
 
 
 def chunk_decisions(plan: RenderPlan) -> list[RenderDecision]:
+    from sculptcut.timewarp import source_time
+
     result = []
     for decision in plan.decisions:
         if decision.action == "DROP":
@@ -233,13 +239,22 @@ def chunk_decisions(plan: RenderPlan) -> list[RenderDecision]:
         )
         if decision.action == "HOLD":
             chunks = 1
+        elif decision.speed_ramp is not None:
+            while chunks < count and any(
+                source_time(decision,(count*(i+1)//chunks)/count)
+                -source_time(decision,(count*i//chunks)/count)>300_000_000
+                for i in range(chunks)
+            ):
+                chunks = min(count,chunks*2)
         for index in range(chunks):
             first_frame = count * index // chunks
             last_frame = count * (index + 1) // chunks
             # Match the tracking decoder's output-frame sampling grid exactly.
             # Equal source-time chunks drift when their frame counts are rounded.
-            start = decision.source_start_us + duration * first_frame // count
-            end = decision.source_start_us + duration * last_frame // count
+            start = (source_time(decision,first_frame/count) if decision.speed_ramp else
+                     decision.source_start_us+duration*first_frame//count)
+            end = (source_time(decision,last_frame/count) if decision.speed_ramp else
+                   decision.source_start_us+duration*last_frame//count)
             result.append(
                 decision.model_copy(
                     update={
@@ -269,12 +284,34 @@ def render(
     variant_cuts: list[tuple[int, int]] | None = None,
     variant_episode_base: RenderPlan | None = None,
 ) -> Path:
-    if preview:
+    if preview and not ORIGINAL_QUALITY_PREVIEW:
+        from sculptcut.episode_roll import catalogue_snapshot
         from sculptcut.preview import render_preview
+        from sculptcut.proxy import make_proxies
+        from sculptcut.variants import read_variant, save_variant
 
         if encoder_status:
             encoder_status("CPU · быстрый предпросмотр")
-        return render_preview(root, project, plan, destination, cancel, progress)
+        if any(d.output_frame_count and d.subject_camera is None
+               and d.action not in ("HOLD", "MONTAGE") for d in plan.decisions):
+            make_proxies(root, project, cancel)
+        plan = plan.model_copy(update={"settings": plan.settings | {"draft": 1}})
+        result = render_preview(root, project, plan, destination, cancel, progress)
+        music = soundtrack(root, project.settings, output_frame_count(
+            project.settings, plan.output_fps, plan.actual_frame_count) / plan.output_fps, cancel)
+        save_variant(result, project=variant_project or project, plan=plan, music=music,
+            parent=variant_parent, operation=variant_operation, cuts=variant_cuts,
+            episode_base_plan=variant_episode_base,
+            episode_catalogue=(None if variant_parent and
+                read_variant(variant_parent).get("episode_catalogue") else
+                catalogue_snapshot(root, variant_project or project, plan)))
+        return result
+    if preview:
+        plan = plan.model_copy(update={"settings": plan.settings | {
+            "draft": 1, "preview_quality": "original"}})
+    elif plan.settings.get("draft"):
+        plan = plan.model_copy(update={"settings": {k:v for k,v in plan.settings.items()
+                                                    if k != "draft"}})
     if encoder not in ("auto", "libx264", "h264_nvenc"):
         raise ValueError("Unknown encoder")
     selected = "h264_nvenc" if encoder != "libx264" and doctor().get("h264_nvenc") else "libx264"
@@ -287,7 +324,7 @@ def render(
             plan,
             destination,
             cancel,
-            preview,
+            False,  # Review drafts use original sources and the export encoder settings.
             selected,
             progress,
             variant_project,
@@ -310,7 +347,7 @@ def render(
             plan,
             destination,
             cancel,
-            preview,
+            False,
             "libx264",
             progress,
             variant_project,
@@ -368,13 +405,14 @@ def _render(
                 continue
             (temporary / name).unlink(missing_ok=True)
             source = sources[decision.source_id]
+            still_input = decision.action == "HOLD" or decision.output_frame_count == 1
             media_path = proxy_path(root, project, source) if preview else source.path
             input_args = [
                 "-ss", f"{decision.source_start_us / 1e6:.6f}",
                 "-reinit_filter", "0", "-i", str(media_path),
             ]
             stream_map = "0:v:0" if preview else f"0:{source.stream_index}"
-            if decision.action == "HOLD":
+            if still_input:
                 timestamp = decision.source_start_us
                 if decision.provenance in ("user:final_tail", "user:shorts_final"):
                     timestamp = max(timestamp, decision.source_end_us - math.ceil(
@@ -389,7 +427,7 @@ def _render(
             ratio = count / fps / duration
             padding = count / fps
             still_motion = ""
-            if decision.action == "HOLD":
+            if still_input:
                 duration, ratio, padding = 1 / fps, 1, count / fps
                 zoom_max = float(plan.settings.get("quiet_hold_zoom_max", 1.0))
                 quiet_min = float(plan.settings.get("quiet_hold_zoom_min_seconds", 0.7))
@@ -452,14 +490,17 @@ def _render(
                     composition = f"scale={width}:{width}:flags=lanczos,"
                 still_motion += square_composition(width, height)
             filter_path = temporary / "frame-filter.txt"
+            from sculptcut.timewarp import pts_expression
+
             timing_filter = (
                 f"trim=end_frame=1,loop=loop=-1:size=1:start=0,setpts=N/{fps}/TB,"
-                if decision.action == "HOLD" else
-                f"setpts=PTS-STARTPTS,trim=duration={duration:.6f},setpts=PTS*{ratio:.12f},"
+                if still_input else
+                f"setpts=PTS-STARTPTS,trim=duration={duration:.6f},"
+                f"setpts={pts_expression(decision,fps)},"
             )
             filter_path.write_text(
                 SDR_FILTER + "," + timing_filter +
-                f"fps={fps},{crop_filter}{composition}setsar=1,{still_motion}"
+                f"fps={fps},trim=end_frame={count},{crop_filter}{composition}setsar=1,{still_motion}"
                 f"tpad=stop_mode=clone:stop_duration={padding:.8f}",
                 encoding="utf-8",
             )
@@ -470,6 +511,8 @@ def _render(
                     "error",
                     "-nostdin",
                     "-xerror",
+                    "-filter_threads", str(FILTER_THREADS),
+                    "-filter_complex_threads", str(FILTER_THREADS),
                     *input_args,
                     "-map",
                     stream_map,
@@ -534,6 +577,16 @@ def _render(
         if progress:
             progress(0.95)
         verify_output(combined, plan.actual_frame_count, fps, cancel)
+        # An ending cover is the last bookend, after an ending presentation too.
+        presentation_first = project.settings.intro_position == "end"
+        if project.settings.presentation_video is not None and presentation_first:
+            presentation = temporary / "presentation.mp4"
+            presentation.unlink(missing_ok=True)
+            attach_presentation(combined, presentation, project.settings, width=width,
+                                height=height, fps=fps, encoder=encoder, cancel=cancel)
+            verify_output(presentation, plan.actual_frame_count
+                          + presentation_frames(project.settings, fps), fps, cancel)
+            combined = presentation
         if (image := active_intro_image(project.settings)) is not None:
             intro = temporary / "intro.mp4"
             intro.unlink(missing_ok=True)
@@ -544,15 +597,19 @@ def _render(
                 width=width,
                 height=height,
                 fps=fps,
-                body_frames=plan.actual_frame_count,
+                body_frames=(plan.actual_frame_count
+                             + (presentation_frames(project.settings, fps)
+                                if presentation_first else 0)),
                 settings=project.settings,
+                overlap_body_frames=plan.actual_frame_count,
                 encoder=encoder,
                 cancel=cancel,
             )
-            verify_output(intro, output_frames - presentation_frames(project.settings, fps),
+            verify_output(intro, output_frames - (0 if presentation_first else
+                                                 presentation_frames(project.settings, fps)),
                           fps, cancel)
             combined = intro
-        if project.settings.presentation_video is not None:
+        if project.settings.presentation_video is not None and not presentation_first:
             presentation = temporary / "presentation.mp4"
             presentation.unlink(missing_ok=True)
             attach_presentation(combined, presentation, project.settings, width=width,
@@ -578,7 +635,8 @@ def _render(
         if destination.exists():
             raise ValueError("Output appeared during render; refusing overwrite")
         os.rename(combined, destination)
-        from sculptcut.variants import save_variant
+        from sculptcut.episode_roll import catalogue_snapshot
+        from sculptcut.variants import read_variant, save_variant
 
         save_variant(
             destination,
@@ -589,6 +647,9 @@ def _render(
             cuts=variant_cuts,
             operation=variant_operation,
             episode_base_plan=variant_episode_base,
+            episode_catalogue=(None if variant_parent and
+                               read_variant(variant_parent).get("episode_catalogue") else
+                               catalogue_snapshot(root, variant_project or project, plan)),
         )
         if guarded_frames:
             atomic_write(

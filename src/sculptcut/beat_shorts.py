@@ -11,7 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from sculptcut.analysis import FrameFeature, read_features
-from sculptcut.audio_beat_sync import analyze_music, select_cut_beats
+from sculptcut.audio_beat_sync import DENSITY, analyze_music, select_cut_beats
 from sculptcut.domain import CameraPoint, Project, Roi, SourceMedia, SubjectCamera
 from sculptcut.intro import body_start_frame, output_frame_count
 from sculptcut.media import Cancelled, MediaError
@@ -23,6 +23,7 @@ from sculptcut.screen_cleanup import screen_kind
 from sculptcut.segmentation import Segment
 from sculptcut.shorts import canvas_bounds, locked_shorts_camera, sculpt_footprint, viewport_box
 from sculptcut.subject_camera import camera_preview
+from sculptcut.visual_transitions import SETTINGS as TRANSITIONS
 from sculptcut.webcam import AnalysisCapture, webcam_roi
 
 
@@ -59,6 +60,8 @@ class BeatStillSettings:
     maximum_lower_edge_occupancy: float = 0.24
     maximum_vivid_interface_fraction: float = 0.005
     minimum_visible_change: float = 2.0
+    accent_visible_change: float = 8.0
+    accent_minimum_quality_ratio: float = 0.75
     maximum_hold_seconds: float = 4.0
 
 
@@ -103,6 +106,12 @@ def _phrase_accents(accents: list[tuple[float, float]]) -> list[tuple[float, flo
 def beat_boundaries(
     root: Path, project: Project, frame_count: int, cancel: Event | None
 ) -> list[int]:
+    return beat_grid(root, project, frame_count, cancel)[0]
+
+
+def beat_grid(
+    root: Path, project: Project, frame_count: int, cancel: Event | None,
+) -> tuple[list[int], set[int]]:
     """Return body frame boundaries, accounting for an optional intro's audio offset."""
     if project.settings.music_path is None and project.settings.music_folder is None:
         raise ValueError("Шортс под музыку требует выбранный музыкальный файл или папку")
@@ -141,7 +150,10 @@ def beat_boundaries(
         if len(frames) < 2:
             raise ValueError("В музыке недостаточно отчётливых акцентов для покадровой нарезки")
         stride = max(1, math.ceil((len(frames) + 1) / SETTINGS.maximum_shots))
-        return [0, *frames[::stride], frame_count]
+        retained = frames[::stride]
+        accents = {round(event.time_seconds * fps) - offset for event in cut_events
+                   if event.accent_strength >= DENSITY.strong_accent_threshold}
+        return [0, *retained, frame_count], accents.intersection(retained)
     peaks = beat_profile(music, total_seconds, project.settings.music_loop, cancel)
     foreground = _phrase_accents(
         foreground_accents(music, total_seconds, project.settings.music_loop, cancel)
@@ -201,7 +213,7 @@ def beat_boundaries(
                 for index in range(remaining)
             ]
             selected = sorted(foreground_cuts + retained_beats, key=lambda event: event[0])
-    return [0, *(frame for frame, _, _ in selected), frame_count]
+    return [0, *(frame for frame, _, _ in selected), frame_count], set()
 
 
 def _feature_score(feature: FrameFeature, segment: Segment | None) -> float:
@@ -237,6 +249,7 @@ def _candidates(
     progress: Callable[[float], None] | None,
     candidates_per_slot: int,
     candidate_spacing_us: int,
+    available_plan: RenderPlan | None = None,
 ) -> list[list[Candidate]]:
     total = sum(source.duration_us for source in project.sources)
     final_window = min(
@@ -253,10 +266,18 @@ def _candidates(
     for source in project.sources:
         rows = grouped[source.id]
         segment_index = 0
+        allowed = [(d.source_start_us, d.source_end_us) for d in available_plan.decisions
+                   if d.source_id == source.id and d.action != "DROP"] if available_plan else []
+        allowed_index = 0
         for feature in read_features(root, project, source):
             if cancel and cancel.is_set():
                 raise Cancelled("Beat-shorts frame selection cancelled")
             time_us = feature.timestamp_us
+            if available_plan is not None:
+                while allowed_index < len(allowed) and allowed[allowed_index][1] <= time_us:
+                    allowed_index += 1
+                if allowed_index == len(allowed) or time_us < allowed[allowed_index][0]:
+                    continue
             if time_us >= source.duration_us or any(
                 override.source_id == source.id
                 and override.action == "DROP"
@@ -410,6 +431,57 @@ def _distinct_indices(images: list[NDArray[np.uint8]], scores: list[float]) -> l
     return chosen
 
 
+def _emphasize_accent_views(
+    selected: list[tuple[int, Candidate, SubjectCamera]],
+    choices: list[list[Candidate]],
+    usable: dict[tuple[str, int], tuple[float, Candidate, SubjectCamera]],
+    appearance: dict[tuple[str, int], NDArray[np.uint8]],
+    boundaries: list[int], accents: set[int],
+    *, all_cuts: bool = False,
+) -> list[tuple[int, Candidate, SubjectCamera]]:
+    """Prefer a visible change at accents using only vetted, chronological alternatives."""
+    result = selected[:]
+    for index in range(1, len(result)):
+        slot, current, _ = result[index]
+        if not all_cuts and boundaries[slot] not in accents:
+            continue
+        previous = result[index - 1][1]
+        following = result[index + 1][1] if index + 1 < len(result) else None
+        previous_image = appearance[(previous.source.id, previous.feature.timestamp_us)]
+        current_key = (current.source.id, current.feature.timestamp_us)
+        target = TRANSITIONS.minimum_difference if all_cuts else SETTINGS.accent_visible_change
+        if _visual_distance(previous_image, appearance[current_key]) >= target:
+            continue
+        lower = previous.source.global_start_us + previous.feature.timestamp_us
+        upper = (following.source.global_start_us + following.feature.timestamp_us
+                 if following else current.source.global_start_us + current.source.duration_us)
+        ratio = max(TRANSITIONS.minimum_quality_ratio, SETTINGS.accent_minimum_quality_ratio)
+        quality_floor = usable[current_key][0] * ratio
+        options = []
+        for candidate in choices[slot]:
+            key = (candidate.source.id, candidate.feature.timestamp_us)
+            match = usable.get(key)
+            if (match is None or match[0] < quality_floor
+                    or not lower < candidate.source.global_start_us
+                    + candidate.feature.timestamp_us < upper):
+                continue
+            image = appearance[key]
+            distance = _visual_distance(previous_image, image)
+            if distance < target:
+                continue
+            if following is not None:
+                next_image = appearance[(following.source.id, following.feature.timestamp_us)]
+                required = (min(target, _visual_distance(appearance[current_key], next_image))
+                            if all_cuts else SETTINGS.minimum_visible_change)
+                if _visual_distance(image, next_image) < required:
+                    continue
+            options.append((match[0], -candidate.feature.timestamp_us, match[1], match[2]))
+        if options:
+            _, _, candidate, camera = max(options, key=lambda item: item[:2])
+            result[index] = (slot, candidate, camera)
+    return result
+
+
 def _beat_still_plan(
     root: Path,
     project: Project,
@@ -424,7 +496,7 @@ def _beat_still_plan(
 ) -> RenderPlan:
     """Select source frames in order and assign each one a music-driven hold duration."""
     requested = round(target_seconds * base.output_fps)
-    boundaries = beat_boundaries(root, project, requested, cancel)
+    boundaries, accents = beat_grid(root, project, requested, cancel)
     slots = len(boundaries) - 1
     choices = _candidates(
         root,
@@ -435,6 +507,8 @@ def _beat_still_plan(
         progress,
         candidates_per_slot,
         candidate_spacing_us,
+        base if base.settings.get("complete_short_catalogue")
+        and not base.settings.get("short_catalogue_fallback") else None,
     )
     selected: list[tuple[int, Candidate, SubjectCamera]] = []
     usable: dict[tuple[str, int], tuple[float, Candidate, SubjectCamera]] = {}
@@ -569,6 +643,8 @@ def _beat_still_plan(
             "Недостаточно пригодных кадров модели для нарезки под музыку"
         )
     selected.sort(key=lambda item: item[1].source.global_start_us + item[1].feature.timestamp_us)
+    selected = _emphasize_accent_views(selected, choices, usable, appearance, boundaries, accents,
+                                     all_cuts=True)
     decisions: list[RenderDecision] = []
     chosen_index = 0
     for source in project.sources:
@@ -643,6 +719,10 @@ def _beat_still_plan(
                 "story": "beat_stills",
                 "beat_sync": "on" if project.settings.beat_sync_enabled else "off",
                 "beat_sync_mode": project.settings.beat_sync_mode,
+                "cut_density": "adaptive-246",
+                "strong_accent_cuts": len(accents.intersection(
+                    boundaries[slot] for slot, _, _ in selected
+                )),
                 "quiet_hold_zoom_min_seconds": SETTINGS.quiet_hold_zoom_min_seconds,
                 "quiet_hold_zoom_max": SETTINGS.quiet_hold_zoom_max,
             },

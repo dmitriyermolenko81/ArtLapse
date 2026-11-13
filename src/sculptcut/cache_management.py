@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from sculptcut.activity import activity_key
 from sculptcut.analysis import analysis_key
 from sculptcut.domain import Project
 from sculptcut.project import cache_key, database
@@ -11,7 +12,7 @@ DAG = {
     "proxy": {"version": 1, "parents": ["source"], "settings": ["proxy_width", "proxy_fps"]},
     "features": {"version": 2, "parents": ["proxy", "roi"], "settings": []},
     "motion": {"version": 2, "parents": ["features"], "settings": []},
-    "activity": {"version": 2, "parents": ["features", "motion"], "settings": []},
+    "activity": {"version": 4, "parents": ["features", "motion"], "settings": []},
     "plan": {
         "version": 1,
         "parents": ["activity", "overrides"],
@@ -35,9 +36,7 @@ def cleanup_stale(root: Path, project: Project) -> dict[str, int]:
                 keys = {
                     "features": analysis_key(project, source),
                     "motion": cache_key("motion-2", analysis_key(project, source)),
-                    "activity": cache_key(
-                        "activity-3-perceptual-stability", analysis_key(project, source)
-                    ),
+                    "activity": activity_key(project, source),
                 }
                 for table, key in keys.items():
                     if table in tables:

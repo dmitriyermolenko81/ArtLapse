@@ -250,6 +250,8 @@ class OutputCutEditor(QWidget):
         row.addWidget(self.save_button)
         for button in (self.remove_button, self.save_button):
             button.setFixedHeight(30)
+            # Fit the shared viewer at its minimum window size without widening it.
+            button.setStyleSheet("QPushButton { padding:0 4px; font-size:12px; }")
         layout.addLayout(row)
         layout.addWidget(self.summary)
         layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetMinimumSize)

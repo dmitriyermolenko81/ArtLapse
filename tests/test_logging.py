@@ -45,6 +45,7 @@ def test_unwritable_log_directory_does_not_prevent_startup(
 ) -> None:
     blocked = tmp_path / "file-instead-of-directory"
     blocked.write_text("occupied", encoding="utf-8")
+    monkeypatch.delenv("ARTLAPSE_DATA_DIR", raising=False)
     monkeypatch.setenv("SCULPTCUT_DATA_DIR", str(blocked))
     stream = io.StringIO()
     logger = configure_logging(stream)

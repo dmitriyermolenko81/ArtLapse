@@ -46,6 +46,7 @@ def _compatible(
             or previous.source_end_us != current.source_start_us
             or previous.action not in ("SPEED", "KEEP") or previous.action != current.action
             or previous.subject_camera is not None or current.subject_camera is not None
+            or previous.speed_ramp is not None or current.speed_ramp is not None
             or previous.sample_times_us or current.sample_times_us
             or previous.crop != current.crop or previous.provenance != current.provenance
             or previous.transition != current.transition

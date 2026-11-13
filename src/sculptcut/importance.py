@@ -1,14 +1,18 @@
 """Observable novelty heuristic with explicit comparability gates."""
 
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from threading import Event
 
-from sculptcut.analysis import FrameFeature, read_features
+from sculptcut.activity import activity_ready
+from sculptcut.analysis import FrameFeature, analysis_key, read_features
 from sculptcut.domain import Project
-from sculptcut.project import atomic_write
-from sculptcut.segmentation import Segment, segment_project
+from sculptcut.media import Cancelled
+from sculptcut.project import atomic_write, cache_get, cache_key, cache_put
+from sculptcut.segmentation import Segment, segment_key, segment_project
+
+IMPORTANCE_VERSION = 'importance-320'
 
 
 def score_segment(segment: Segment, features: Iterable[FrameFeature]) -> Segment:
@@ -56,17 +60,49 @@ def score_segment(segment: Segment, features: Iterable[FrameFeature]) -> Segment
     return segment.model_copy(update={"importance": value, "components": components})
 
 
-def importance_project(root: Path, project: Project, cancel: Event | None = None) -> list[Segment]:
-    segments = segment_project(root, project, cancel)
+def importance_project(root: Path, project: Project, cancel: Event | None = None,
+                       stage: Callable[[str], None] | None = None) -> list[Segment]:
+    if cancel and cancel.is_set():
+        raise Cancelled('Importance analysis cancelled')
+    cached: dict[str, list[Segment]] = {}
+    for source in project.sources:
+        if cache_get(root, 'features', source.id, analysis_key(project, source)) is not None:
+            value = cache_get(root, 'importance', source.id,
+                              cache_key(IMPORTANCE_VERSION, segment_key(project, source.id)))
+            if value is not None:
+                cached[source.id] = [Segment.model_validate(row) for row in value]
+    if stage:
+        if len(cached) == len(project.sources):
+            stage('Используем сохранённый анализ видео')
+        elif all(activity_ready(root, project, s) for s in project.sources if s.id not in cached):
+            stage('Обновляем оценки из сохранённых измерений')
+        else:
+            stage('Анализируем активность видео')
+    segments = segment_project(root, project, cancel) if len(cached) < len(project.sources) else []
     sources = {s.id: s for s in project.sources}
-    result = [
-        score_segment(
+    measured = []
+    for segment in segments:
+        if cancel and cancel.is_set():
+            raise Cancelled('Importance analysis cancelled')
+        if segment.source_id in cached:
+            continue
+        measured.append(score_segment(
             segment,
             read_features(
                 root, project, sources[segment.source_id], segment.start_us, segment.end_us
             ),
-        )
-        for segment in segments
-    ]
+        ))
+    if cancel and cancel.is_set():
+        raise Cancelled('Importance analysis cancelled')
+    result = []
+    for source in project.sources:
+        rows = cached.get(source.id)
+        if rows is None:
+            rows = [s for s in measured if s.source_id == source.id]
+            if cache_get(root, 'features', source.id, analysis_key(project, source)) is not None:
+                cache_put(root, 'importance', source.id,
+                          cache_key(IMPORTANCE_VERSION, segment_key(project, source.id)),
+                          [s.model_dump() for s in rows])
+        result.extend(rows)
     atomic_write(root / "segments.json", json.dumps([s.model_dump() for s in result], indent=2))
     return result

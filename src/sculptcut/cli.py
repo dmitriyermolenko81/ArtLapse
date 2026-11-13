@@ -24,7 +24,7 @@ from sculptcut.quality import evaluate_suite
 from sculptcut.rendering import render
 from sculptcut.review import review_html
 from sculptcut.roi import set_roi
-from sculptcut.shorts_layout import SHORTS_PRESETS
+from sculptcut.shorts_layout import ACTIVE_PRESETS, SHORTS_PRESETS
 
 COMMANDS = {
     "evaluate": "Compare presets against reviewed annotations",
@@ -82,10 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument("--pacing", choices=["expressive", "restrained"])
             sub.add_argument(
                 "--preset",
-                choices=[
-                    "timelapse", "shorts", "beat_shorts", "music_shorts", "speed",
-                    "photoshop_shorts", "photoshop_beat_shorts", "photoshop_music_shorts",
-                ],
+                choices=ACTIVE_PRESETS,
             )
             sub.add_argument("--sculpt-only", action=argparse.BooleanOptionalAction, default=None)
             sub.add_argument("--final-view-seconds", type=float)

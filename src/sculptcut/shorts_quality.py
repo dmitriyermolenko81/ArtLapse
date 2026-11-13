@@ -1,7 +1,7 @@
 """Bounded visual checks for ordinary Shorts work episodes, independent of beat stills."""
 
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event
 from types import TracebackType
@@ -23,6 +23,7 @@ from sculptcut.webcam import AnalysisCapture, webcam_roi
 
 @dataclass(frozen=True)
 class EpisodeQuality:
+    work_minimum_tracking_quality: float = 0.4
     samples: int = 9
     edge_margin: float = 0.025
     maximum_center_travel: float = 0.10
@@ -114,8 +115,11 @@ def stable_episode_score(frames: list[NDArray[np.uint8]]) -> float:
 
 
 class EpisodeInspector:
-    def __init__(self, root: Path, project: Project, cancel: Event | None = None) -> None:
+    def __init__(self, root: Path, project: Project, cancel: Event | None = None,
+                 *, work_only: bool = False, drawing_mode: bool = False) -> None:
         self.root, self.project, self.cancel = root, project, cancel
+        self.work_only = work_only
+        self.drawing_mode = drawing_mode
         self.readers: dict[str, cv2.VideoCapture | AnalysisCapture] = {}
         self.inspections: OrderedDict[Window, tuple[float, DevelopmentEvidence]] = OrderedDict()
 
@@ -164,25 +168,38 @@ class EpisodeInspector:
             quality = 0.0
         evidence = DevelopmentEvidence()
         roi = self.project.rois.get(source_id)
-        if roi is None:
+        if roi is None and self.drawing_mode:
+            from sculptcut.photoshop import drawing_and_canvas_box
+
+            _, roi = drawing_and_canvas_box(frames[0])
+        if roi is None and not self.drawing_mode:
             roi = viewport_box(cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY).astype(np.uint8))
+        if self.work_only and not self.drawing_mode and roi is not None:
+            # Static navigation widgets must not dominate motion tracks while
+            # the model itself is being zoomed or rotated below them.
+            gray = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY).astype(np.uint8)
+            subject = sculpt_footprint(gray, roi)
+            roi = subject
         # Timelapses may intentionally show a close-up that Shorts framing
         # rejects. Appearance evidence has its own motion/comparability gates.
         distinct_frames = (end - start) * reader.get(cv2.CAP_PROP_FPS) / 1_000_000
-        if roi is not None and distinct_frames >= DEVELOPMENT.minimum_frames and not any(
+        minimum_distinct = 3 if self.work_only else DEVELOPMENT.minimum_frames
+        if roi is not None and distinct_frames >= minimum_distinct and not any(
             screen_kind(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.uint8))
             for frame in frames
         ):
             samples = []
             for frame in frames:
                 x, y, right, bottom = pixel_bounds(roi, frame.shape[1], frame.shape[0])
-                gray = cv2.cvtColor(frame[y:bottom, x:right], cv2.COLOR_BGR2GRAY)
+                gray = cv2.cvtColor(frame[y:bottom, x:right], cv2.COLOR_BGR2GRAY).astype(np.uint8)
                 scale = DEVELOPMENT.width / max(gray.shape)
                 resized = cv2.resize(gray, (
                     max(1, round(gray.shape[1] * scale)), max(1, round(gray.shape[0] * scale)),
                 ))
                 samples.append(cv2.GaussianBlur(resized, (3, 3), 0).astype(np.uint8))
-            evidence = measure_development(samples)
+            evidence = measure_development(samples, replace(
+                DEVELOPMENT, minimum_tracking_quality=QUALITY.work_minimum_tracking_quality
+            ) if self.work_only else DEVELOPMENT)
         self.inspections[window] = (quality, evidence)
         if len(self.inspections) > DEVELOPMENT.cache_entries:
             self.inspections.popitem(last=False)
@@ -209,3 +226,19 @@ class EpisodeInspector:
             round(viewport.x * w) : round((viewport.x + viewport.width) * w),
         ]
         return cv2.resize(region, (64, 64), interpolation=cv2.INTER_AREA).astype(np.uint8)
+
+    def view(self, source_id: str, time_us: int) -> tuple[float,bool] | None:
+        from sculptcut.final_result import result_frame
+
+        reader = self.readers.get(source_id)
+        if reader is None:
+            return None
+        frame = proxy_sample(reader,time_us,reader.get(cv2.CAP_PROP_FPS),self.cancel)
+        if frame is None:
+            return None
+        gray = cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY).astype(np.uint8)
+        viewport = viewport_box(gray)
+        box = sculpt_footprint(gray,viewport) if viewport else None
+        if viewport is None or box is None:
+            return None
+        return box.height/viewport.height,result_frame(frame) is not None

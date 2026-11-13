@@ -1,5 +1,35 @@
 # Подготовка исходников к GitHub
 
+## 0.1.3 — 2026-11-13
+
+The publication checkout passed 72 targeted tests: 38 fast source checks,
+24 timeline/music/catalogue/scrollbar checks, and 10 analysis-cache regressions.
+Ruff and strict mypy passed (158 source modules). GUI test modules run in fresh
+processes. Test screenshots use temporary directories, so a fresh checkout does
+not need pre-existing local artifact folders.
+
+Real Qt windows were captured in Russian and English with decoded video,
+independent video/music lanes, background waveforms and optional fades.
+Short real music exports were inspected with ffprobe and decoded to verify
+fade envelopes and both stereo channels. No original recording was changed.
+
+The complete portable ZIP was checked by CRC, per-file SHA256 and extraction;
+the extracted frozen app played video in RU/EN with only the Windows system PATH.
+All 151 dependency binaries match the previously published component set;
+retained licenses and the v0.1.0 library source kit continue to apply.
+The executable's 151 embedded application modules match the publication source.
+CLI-only modules and legacy unused modules are not included in the GUI archive.
+
+Full pytest and all-mode rendering were NOT RUN again for this publication:
+focused checks complement earlier local validation and do not replace it.
+The executable is unsigned. A second clean Windows machine was NOT VERIFIED.
+Long combined native Qt test sessions can still have process-teardown issues;
+this release does not claim to fix that platform limitation.
+No personal projects, recordings, preferences or credentials are bundled.
+
+See [release notes](releases/0.1.3.md) and [updates](updates.md).
+
+
 ## ArtLapse 0.1.1 — 2026-10-24
 
 Current source and complete Windows portable release: update checks and restored

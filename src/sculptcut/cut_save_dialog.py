@@ -15,9 +15,11 @@ from sculptcut.ui_theme import apply_dialog_theme, dialog_header
 
 
 class CutSaveDialog(QDialog):
-    def __init__(self, unavailable_reason: str, parent: QWidget | None = None) -> None:
+    def __init__(self, unavailable_reason: str, parent: QWidget | None = None,
+                 *, preview: bool = False) -> None:
         super().__init__(parent)
-        self.setWindowTitle(tr("Сохранение подрезки"))
+        self.setWindowTitle(tr("Обновление предпросмотра") if preview
+                            else tr("Сохранение подрезки"))
         self.setMinimumWidth(500)
         apply_dialog_theme(self, """
 QRadioButton { background:transparent; spacing:10px; font-weight:600; }
@@ -54,7 +56,8 @@ QRadioButton::indicator:disabled { background:#1e2630; border-color:#485465; }
         self.reason.setVisible(bool(unavailable_reason))
         layout.addWidget(self.reason)
         self.refill.setToolTip(unavailable_reason)
-        note = QLabel(tr("Результат сохранится в новый файл. Предыдущая версия останется."))
+        note = QLabel(tr("Правки обновят черновик. Финальный экспорт — в главном окне.") if preview
+                      else tr("Результат сохранится в новый файл. Предыдущая версия останется."))
         note.setWordWrap(True)
         layout.addWidget(note)
         actions = QHBoxLayout()
@@ -63,7 +66,8 @@ QRadioButton::indicator:disabled { background:#1e2630; border-color:#485465; }
         self.cancel_button.setAutoDefault(False)
         self.cancel_button.clicked.connect(self.reject)
         actions.addWidget(self.cancel_button)
-        self.save_button = QPushButton(tr("Сохранить копию"))
+        self.save_button = QPushButton(tr("Обновить предпросмотр") if preview
+                                       else tr("Сохранить копию"))
         self.save_button.setObjectName("primary")
         self.save_button.setDefault(True)
         self.save_button.clicked.connect(self.accept)

@@ -126,6 +126,12 @@ def test_real_file_picker_save_export_and_change_music(
         window.create_button.click()
         assert not window.music_file_button.isEnabled()
         finish()
+        preview = window.last_result_video
+        assert preview is not None and preview.parent == root / "previews"
+        verify_output(preview, 30, 30, expected_audio=True)
+        assert not list((root / "renders").glob("*.mp4"))
+        window.export_button.click()
+        finish()
         original = root / "renders/single_speed.mp4"
         verify_output(original, 30, 30, expected_audio=True)
         original_hash = fingerprint(original)

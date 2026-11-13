@@ -4,7 +4,7 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import QButtonGroup, QGridLayout, QLabel, QSizePolicy, QToolButton, QWidget
 
 from sculptcut.i18n import tr
-from sculptcut.shorts_layout import SHORTS_PRESETS
+from sculptcut.shorts_layout import ACTIVE_SHORTS_PRESETS, RETIRED_STILL_PRESETS, SHORTS_PRESETS
 from sculptcut.ui_icons import IconName, ui_icon
 
 PRESENTATION: dict[str, tuple[str, IconName]] = {
@@ -29,7 +29,7 @@ PRESET_DESCRIPTIONS = {
     "shorts": "Вертикальный ролик из коротких эпизодов работы.",
     "music_shorts": "Движущиеся видеоэпизоды сменяются под музыкальные акценты.",
     "beat_shorts": "Стоп-кадры сменяются в ритме выбранной музыки.",
-    "speed": "Вся запись ускоряется без удаления участков.",
+    "speed": "Ускоряет запись с учётом ручных вырезок и скоростей.",
     "photoshop_shorts": "Вертикальный монтаж с камерой внутри холста.",
     "photoshop_music_shorts": "Движущиеся эпизоды рисования сменяются под музыкальные акценты.",
     "photoshop_beat_shorts": "Стадии рисунка сменяются под музыку; рамка неподвижна.",
@@ -146,6 +146,7 @@ class PresetSelector(QWidget):
         self.activated.emit()
 
     def findData(self, value: str) -> int:
+        value = RETIRED_STILL_PRESETS.get(value, value)
         return next((i for i, (_, data) in enumerate(self._items) if data == value), -1)
 
     def currentData(self) -> str:
@@ -164,15 +165,16 @@ class PresetSelector(QWidget):
         for button in self.buttons.values():
             self._row.removeWidget(button)
         if not self._slots:
-            for column in range(len(SHORTS_PRESETS)):
+            for column in range(len(ACTIVE_SHORTS_PRESETS)):
                 slot = QWidget(self)
                 slot.setStyleSheet("background:transparent;")
                 slot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
                 self._row.addWidget(slot, 0, column)
                 self._slots.append(slot)
         for column in range(len(self._items)):
-            self._row.setColumnStretch(column, 1 if column < len(SHORTS_PRESETS) else 0)
-            self._row.setColumnMinimumWidth(column, 44 if column < len(SHORTS_PRESETS) else 0)
+            self._row.setColumnStretch(column, 1 if column < len(ACTIVE_SHORTS_PRESETS) else 0)
+            self._row.setColumnMinimumWidth(
+                column, 44 if column < len(ACTIVE_SHORTS_PRESETS) else 0)
         column = 0
         for value, button in self.buttons.items():
             visible = (value in SHORTS_PRESETS) == shorts

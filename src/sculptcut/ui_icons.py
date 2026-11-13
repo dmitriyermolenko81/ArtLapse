@@ -13,7 +13,7 @@ IconName = Literal[
     "screen", "viewport", "play", "pause", "cut", "add", "close", "chevron_down", "chevron_up",
     "check", "info",
     "trash", "crop", "episodes_music", "feedback", "presentation", "speaker", "muted",
-    "templates", "update",
+    "templates", "update", "settings",
 ]
 
 
@@ -36,7 +36,12 @@ def ui_icon(name: IconName, accent: str = "#a9cbff") -> QIcon:
     )
     painter.setBrush(Qt.BrushStyle.NoBrush)
 
-    if name == "update":
+    if name == "settings":
+        for slider_y, slider_x in ((6, 8), (12, 16), (18, 10)):
+            painter.drawLine(QPointF(3, slider_y), QPointF(21, slider_y))
+            painter.setBrush(QColor("#202832"))
+            painter.drawEllipse(QPointF(slider_x, slider_y), 2, 2)
+    elif name == "update":
         painter.drawArc(QRectF(3, 3, 18, 18), 45 * 16, 275 * 16)
         painter.drawLine(QPointF(18.5, 3.5), QPointF(18.5, 9))
         painter.drawLine(QPointF(13, 9), QPointF(18.5, 9))

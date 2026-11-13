@@ -178,6 +178,7 @@ def test_gui_real_pipeline_and_responsiveness(
         assert image.save(str(intro_image))
         window.intro_image.setText(str(intro_image))
     if with_music:
+        window.output_name.setText("timelapse-001")
         folder = tmp_path / "music"
         folder.mkdir()
         for index in range(2):
@@ -203,7 +204,8 @@ def test_gui_real_pipeline_and_responsiveness(
     try:
         stages: list[str] = []
         window.job_stage.connect(stages.append)
-        actions = ("render", "preview") if with_music else ("create",)
+        actions = ("create", "export")
+        results: list[Path] = []
         for action in actions:
             assert window.create_button.isVisible()
             assert not hasattr(window, "preview_button")
@@ -213,8 +215,13 @@ def test_gui_real_pipeline_and_responsiveness(
             if action == "create":
                 window.create_button.click()
             else:
-                window.start_action(action)
-            assert window.job is not None
+                deadline = time.monotonic() + 15
+                while not window.export_button.isEnabled() and time.monotonic() < deadline:
+                    QTest.qWait(10)
+                assert window.export_button.isEnabled(), window.last_error
+                window.export_button.click()
+            assert window.job is not None, (action, window.last_error.encode("unicode_escape"),
+                                           window.player.source().toLocalFile())
             assert window.progress_bar.maximum() == 0
             deadline = time.monotonic() + 60
             while window.job is not None and time.monotonic() < deadline:
@@ -222,8 +229,12 @@ def test_gui_real_pipeline_and_responsiveness(
                 time.sleep(0.01)  # Release the GIL while the real worker analyzes frames.
             assert window.job is None, "GUI job timed out"
             assert not window.last_error, window.last_error
+            result = window.last_result_video
+            assert result is not None and result.is_file()
+            assert result.parent == root / ("previews" if action == "create" else "renders")
+            results.append(result)
             if not with_music:
-                assert (root / "renders" / "Моя модель_timelapse.mp4").is_file()
+                assert result.name == "Моя модель_timelapse.mp4"
                 assert window.create_button.text() == "Создать ролик"
                 assert not hasattr(window, "review_panel")
                 assert not hasattr(window, "episode_timeline")
@@ -237,25 +248,19 @@ def test_gui_real_pipeline_and_responsiveness(
         assert saved.settings.music_loop is False
         assert saved.settings.target_seconds == 6
         assert saved.settings.intro_image == intro_image
-        assert saved.settings.output_name == ("Моя модель" if not with_music else "")
+        assert saved.settings.output_name == ("Моя модель" if not with_music else "timelapse-001")
         assert not (root / "review.html").exists()
         assert any(stage.startswith("Creating and checking analysis proxy:") for stage in stages)
         assert "Measuring frame changes" in stages
         assert stages.count("Measuring frame changes") == 1
         assert window.progress_bar.maximum() == 100
-        if with_music:
-            verify_output(root / "previews" / "timelapse-001.mp4", 180, 30, expected_audio=True)
-        else:
-            assert not list((root / "previews").glob("*.mp4"))
-            assert "Rendering preview" not in stages
-            assert stages.count("Rendering MP4 from originals") == 1
+        assert len(list((root / "previews").glob("*.mp4"))) == 1
+        verify_output(results[0], 180, 30, expected_audio=with_music)
         expected_frames = round(saved.settings.target_seconds * saved.settings.output_fps)
         assert expected_frames == 180  # Selected six seconds include the intro.
         assert "Ролик: 00:06" in window.statistics.text()
         verify_output(
-            root
-            / "renders"
-            / ("timelapse-001_timelapse.mp4" if with_music else "Моя модель_timelapse.mp4"),
+            results[1],
             expected_frames,
             30,
             expected_audio=with_music,
@@ -264,16 +269,16 @@ def test_gui_real_pipeline_and_responsiveness(
             assert saved.settings.music_folder == folder
             assert saved.settings.music_selection_mode == "full_tracks"
             assert saved.settings.music_seed == window.music_seed
-            # Export advances the music seed; the subsequent preview is a new variant.
+            # Explicit export preserves the soundtrack already heard in the draft.
             import json
 
             mixes = list((root / "music").glob("*.flac"))
-            assert len(mixes) == 2
+            assert len(mixes) == 1
             seeds = {
                 json.loads(p.with_suffix(".json").read_text(encoding="utf-8"))["seed"]
                 for p in mixes
             }
-            assert len(seeds) == 2
+            assert len(seeds) == 1
         window.target.setValue(20)
         monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *args: str(root))
         window.choose_folder()

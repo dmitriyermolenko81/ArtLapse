@@ -9,9 +9,28 @@ import numpy as np
 from sculptcut.analysis import Gray
 from sculptcut.domain import CameraPoint, ProjectSettings, Roi, SourceMedia, SubjectCamera
 from sculptcut.media import Cancelled, MediaError
-from sculptcut.shorts import sculpt_footprint, viewport_box
+from sculptcut.shorts import sculpt_footprint, shared_viewport, tracking_viewport, viewport_box
 from sculptcut.subject_camera import tracking_clip
 from sculptcut.webcam import AnalysisCapture, webcam_roi
+
+
+def square_viewport(
+    gray: Gray, roi: Roi, reference: Roi | None, manual: Roi | None = None,
+) -> Roi:
+    """Do not mistake background exposed beside a close-up for the whole canvas."""
+    if manual is not None:
+        return manual
+    detected = viewport_box(gray)
+    if detected is None:
+        return reference or roi
+    h, w = gray.shape
+    left = detected.x + (1 / w if detected.x > 0 else 0)
+    top = detected.y + (1 / h if detected.y > 0 else 0)
+    right = detected.x + detected.width - (1 / w if detected.x + detected.width < 1 else 0)
+    bottom = detected.y + detected.height - (1 / h if detected.y + detected.height < 1 else 0)
+    if right > left and bottom > top:
+        detected = Roi(x=left, y=top, width=right-left, height=bottom-top)
+    return tracking_viewport(gray, detected, reference or roi)
 
 
 def horizontal_camera(
@@ -116,21 +135,12 @@ def measure_square_episode(
     capture = AnalysisCapture(clip, webcam_roi(settings, source.id))
     samples: list[tuple[int, Roi]] = []
     previous = roi
+    reference_viewport = manual_viewport or roi
 
     def canvas(gray: Gray) -> Roi:
-        detected = manual_viewport or viewport_box(gray)
-        if detected is None:
-            return roi  # An uncertain canvas must never enable panning into the full UI.
-        if manual_viewport is None:
-            h, w = gray.shape
-            left = detected.x + (1 / w if detected.x > 0 else 0)
-            top = detected.y + (1 / h if detected.y > 0 else 0)
-            right = detected.x + detected.width - (1 / w if detected.x + detected.width < 1 else 0)
-            bottom = (
-                detected.y + detected.height - (1 / h if detected.y + detected.height < 1 else 0)
-            )
-            if right > left and bottom > top:
-                detected = Roi(x=left, y=top, width=right - left, height=bottom - top)
+        nonlocal reference_viewport
+        detected = square_viewport(gray, roi, reference_viewport, manual_viewport)
+        reference_viewport = detected
         if viewports is not None:
             viewports.append(detected)
         return detected
@@ -191,10 +201,14 @@ def measure_square_episode(
     return sorted(samples, key=lambda sample: sample[0])
 
 
-def safe_viewport(viewports: list[Roi], roi: Roi) -> Roi:
+def safe_viewport(viewports: list[Roi], roi: Roi, subjects: list[Roi] | None = None) -> Roi:
     """One conservative canvas for the episode, shared by camera and pixel clipping."""
     if not viewports:
         return roi
+    if subjects:
+        # A lone faulty background measurement must not crop out a model that
+        # was observed in the other frames of the same episode.
+        viewports = [shared_viewport(viewports, subjects)]
     left = max(v.x for v in viewports)
     right = min(v.x + v.width for v in viewports)
     top = max(roi.y, *(v.y for v in viewports))

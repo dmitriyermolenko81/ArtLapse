@@ -1,5 +1,6 @@
 """Compose output trims and source-time episode edits against the selected export."""
 
+import json
 import os
 import tempfile
 from collections.abc import Callable
@@ -111,24 +112,93 @@ def _neutral_plan(
     }})
 
 
-def apply_episode_edits(project: Project, plan: RenderPlan) -> RenderPlan:
-    result = apply_overrides(project, plan, manual=True)
+def _speed_baseline(project: Project) -> str:
+    return json.dumps([o.model_dump(mode="json") for o in project.overrides
+                       if o.action == "SET_SPEED"], sort_keys=True)
+
+
+def _original_speed_baseline(video: Path, state: dict[str, object]) -> str:
+    """Recover the pre-edit rules for old variants without the saved baseline."""
+    seen: set[Path] = set()
+    while state.get("episode_base_plan") and isinstance(parent := state.get("parent"), str):
+        if Path(parent).name != parent:
+            break
+        candidate = video.with_name(parent)
+        if candidate in seen:
+            break
+        seen.add(candidate)
+        try:
+            previous = read_variant(candidate)
+        except (OSError, ValueError):
+            break
+        # A removed parent has no snapshot. Keep the last usable layer instead
+        # of replacing it with {} and failing when reading its project below.
+        if not previous.get("project"):
+            break
+        state = previous
+        video = candidate
+    return _speed_baseline(Project.model_validate(state["project"]))
+
+
+def apply_episode_edits(
+    project: Project, plan: RenderPlan, *, root: Path | None = None,
+) -> RenderPlan:
+    if plan.settings.get("source_selection"):
+        from sculptcut.source_selection import apply_selection_rules
+
+        return apply_selection_rules(project, plan)
+    from sculptcut.restored_work import fit_edit_budget, prepare_restored_work, trim_budget_windows
+
+    prepared, plan, bounded = prepare_restored_work(root, project, plan)
+    inherited = [Override.model_validate(o) for o in json.loads(str(
+        plan.settings.get("episode_speed_baseline", "[]"),
+    ))]
+    result = apply_overrides(prepared, plan, manual=True, inherited_speeds=inherited,
+                             bounded_restores=bounded)
+    rebudgeted = result.actual_frame_count > plan.target_frame_count
+    if rebudgeted:
+        result = fit_edit_budget(prepared, result, plan.target_frame_count)
     if plan.settings.get("manual_duration_policy") == "refill":
         result = refill_plan_after_cuts(project, result, [], allow_empty=True,
                                         respect_episode_speeds=True)
+    if "episode_music_events" in plan.settings:
+        from sculptcut.audio_beat_sync import MusicEvent
+        from sculptcut.music_episodes import retime_episodes
+
+        events = [MusicEvent(**event) for event in json.loads(str(
+            plan.settings["episode_music_events"],
+        ))]
+        result = retime_episodes(project, result, events,
+                                float(plan.settings.get("episode_music_offset", 0)),
+                                preserve_source_windows=True)
+    if rebudgeted:
+        result = trim_budget_windows(prepared,result)
+        validate_plan(project,result)
+    if root is not None:
+        if result.settings.get("work_episodes_version"):
+            from sculptcut.work_episodes import refresh_highlights
+
+            result = refresh_highlights(root, prepared, result)
+        from sculptcut.final_result import ensure_final_result
+
+        result = ensure_final_result(root, prepared, result)
+    from sculptcut.timelapse_phrases import smooth_phrases
+
+    result = smooth_phrases(result)
     return result
 
 
 def prepare_combined_edit(
     root: Path, video: Path, cuts: list[tuple[int, int]] | None = None, *,
-    apply_current: bool = True,
+    apply_current: bool = True, exact_variant: bool = False,
 ) -> CombinedEdit:
     state = read_variant(video)
     if not state.get("project") or not state.get("plan"):
         raise ValueError("У этой версии нет монтажного плана. Доступна обычная подрезка.")
     current = load_project(root)
     snapshot = resolve_snapshot_sources(Project.model_validate(state["project"]), current)
-    snapshot = snapshot.model_copy(update={"overrides": current.overrides})
+    if not exact_variant:
+        snapshot = snapshot.model_copy(update={"overrides": current.overrides})
     original = RenderPlan.model_validate(state["plan"])
     project, original = refill_render_context(video, snapshot, original)
     validate_plan(project, original)
@@ -168,11 +238,35 @@ def prepare_combined_edit(
             ),
         },
     })
-    plan = _neutral_plan(state, project, original, plan, bool(frame_cuts))
+    if not exact_variant:
+        plan = _neutral_plan(state, project, original, plan, bool(frame_cuts))
+    if "episode_speed_baseline" not in plan.settings:
+        plan = plan.model_copy(update={"settings": plan.settings | {
+            "episode_speed_baseline": _original_speed_baseline(video, state),
+        }})
+    if (project.settings.preset in ("music_shorts", "photoshop_music_shorts")
+            and plan.settings.get("story") in ("process", "music_episodes",
+                                                "photoshop_music_episodes")
+            and (project.settings.music_path or project.settings.music_folder)
+            and ("episode_music_events" not in plan.settings
+                 or current.overrides != Project.model_validate(state["project"]).overrides)):
+        from dataclasses import asdict
+
+        from sculptcut.music_episodes import music_events
+
+        events, music_offset = music_events(root, project, plan.actual_frame_count, None)
+        plan = plan.model_copy(update={"settings": plan.settings | {
+            "episode_music_events": json.dumps([asdict(event) for event in events]),
+            "episode_music_offset": music_offset,
+        }})
     validate_plan(project, plan)
     base_plan = plan
     if apply_current:
-        plan = apply_episode_edits(project, plan)
+        plan = apply_episode_edits(project, plan, root=root)
+        if "restored_work_selection" in plan.settings:
+            base_plan = base_plan.model_copy(update={"settings":base_plan.settings | {
+                "restored_work_selection":plan.settings["restored_work_selection"],
+            }})
     plan = plan.model_copy(update={"settings": plan.settings | {
         "actual_output_frames": output_frame_count(project.settings, fps, plan.actual_frame_count),
     }})
@@ -189,11 +283,48 @@ def prepare_refill_edit(root: Path, video: Path, cuts: list[tuple[int, int]]) ->
     base = base.model_copy(update={"settings": base.settings | {
         "manual_duration_policy": "refill",
     }})
-    result = apply_episode_edits(edit.project, base)
+    result = apply_episode_edits(edit.project, base, root=root)
     return replace(edit, plan=result, base_plan=base, leading=[], trailing=[])
 
 
-def creation_edit(project: Project, plan: RenderPlan, previous: CombinedEdit) -> CombinedEdit:
+def creation_selection_project(project: Project, previous: CombinedEdit | None) -> Project:
+    """Exclude manual source ranges before choosing the new musical episodes.
+
+    Output cut timestamps belong to the old video; its neutral layer already
+    maps them to original source time. Speed/keep rules are split around the
+    merged exclusions so no later rule can return a deliberately cut interval.
+    """
+    if previous is None:
+        return project
+    exclusions = [(o.source_id, o.start_us, o.end_us) for o in project.overrides
+                  if o.action == "DROP"]
+    exclusions += [(d.source_id, d.source_start_us, d.source_end_us)
+                   for d in previous.base_plan.decisions
+                   if d.provenance == "user:shorts_manual_cut"]
+    merged: list[Override] = []
+    for source_id, start, end in sorted(exclusions):
+        if merged and merged[-1].source_id == source_id and start <= merged[-1].end_us:
+            merged[-1] = merged[-1].model_copy(update={"end_us": max(merged[-1].end_us, end)})
+        else:
+            merged.append(Override(source_id=source_id, start_us=start, end_us=end, action="DROP"))
+    rules = merged[:]
+    for rule in project.overrides:
+        if rule.action == "DROP":
+            continue
+        cuts = [o for o in merged if o.source_id == rule.source_id
+                and o.start_us < rule.end_us and o.end_us > rule.start_us]
+        bounds = sorted({rule.start_us, rule.end_us} | {
+            max(rule.start_us, min(t, rule.end_us)) for o in cuts for t in (o.start_us, o.end_us)
+        })
+        for start, end in zip(bounds, bounds[1:], strict=False):
+            if not any(o.start_us <= start and end <= o.end_us for o in cuts):
+                rules.append(rule.model_copy(update={"start_us": start, "end_us": end}))
+    return Project.model_validate(project.model_dump() | {"overrides": rules})
+
+
+def creation_edit(
+    project: Project, plan: RenderPlan, previous: CombinedEdit, *, root: Path | None = None,
+) -> CombinedEdit:
     """Carry selected output exclusions onto a fresh plan in source coordinates.
 
     The new plan supplies the current preset, crop, music and duration. Output
@@ -224,12 +355,11 @@ def creation_edit(project: Project, plan: RenderPlan, previous: CombinedEdit) ->
                 max(decision.source_start_us, min(t, decision.source_end_us))
                 for d in cuts for t in (d.source_start_us, d.source_end_us)
             })
-            duration = decision.source_end_us - decision.source_start_us
+            from sculptcut.timewarp import output_before
+
             for start, end in zip(bounds, bounds[1:], strict=False):
                 removed = any(d.source_start_us <= start and end <= d.source_end_us for d in cuts)
-                count = (decision.output_frame_count * (end - decision.source_start_us) // duration
-                         - decision.output_frame_count * (start - decision.source_start_us)
-                         // duration)
+                count = output_before(decision,end)-output_before(decision,start)
                 if decision.action == "HOLD":
                     # A hold samples only its first timestamp. Keep that image
                     # and the exact exclusion mask for a later moving preset.
@@ -251,10 +381,23 @@ def creation_edit(project: Project, plan: RenderPlan, previous: CombinedEdit) ->
         "decisions": decisions, "actual_frame_count": actual,
         "target_frame_count": plan.target_frame_count if policy == "refill" else actual,
         "settings": {key: value for key, value in plan.settings.items() if key != "request_key"}
-        | {"manual_duration_policy": policy, "refill_target_frame_count": plan.target_frame_count},
+        | {"manual_duration_policy": policy, "refill_target_frame_count": plan.target_frame_count,
+           "episode_speed_baseline": _speed_baseline(project)},
     })
+    if 'selection_edit_journal' in previous.plan.settings:
+        base = base.model_copy(update={'settings': base.settings | {
+            'selection_edit_journal': previous.plan.settings['selection_edit_journal']}})
+    if ("restored_work_selection" in previous.base_plan.settings
+            and "restored_work_selection" not in base.settings):
+        base = base.model_copy(update={"settings":base.settings | {
+            "restored_work_selection":previous.base_plan.settings["restored_work_selection"],
+        }})
     validate_plan(project, base)
-    result = apply_episode_edits(project, base)
+    result = apply_episode_edits(project, base, root=root)
+    if "restored_work_selection" in result.settings:
+        base = base.model_copy(update={"settings":base.settings | {
+            "restored_work_selection":result.settings["restored_work_selection"],
+        }})
     result = result.model_copy(update={"settings": result.settings | {
         "actual_output_frames": output_frame_count(
             project.settings, plan.output_fps, result.actual_frame_count,
@@ -279,10 +422,18 @@ def render_combined_edit(
     progress: Callable[[float], None], *, encoder: str = "auto",
     encoder_status: Callable[[str], None] | None = None,
     preview: bool = False,
+    operation: str = "combined_edit",
 ) -> Path:
     """Render body edits from originals, then retain any deliberately trimmed bookends."""
     if destination.suffix.lower() != ".mp4" or destination.exists():
         raise ValueError("Output must be a new .mp4 path")
+    def delivery(plan: RenderPlan) -> RenderPlan:
+        settings = {k:v for k,v in plan.settings.items() if k != "draft"}
+        if preview:
+            settings["draft"] = 1
+        return plan.model_copy(update={"settings": settings})
+
+    edit = replace(edit, plan=delivery(edit.plan), base_plan=delivery(edit.base_plan))
     from sculptcut.episode_framing import frame_restored_episodes
 
     plan, base_plan = frame_restored_episodes(
@@ -301,7 +452,7 @@ def render_combined_edit(
                       progress=progress,
                       encoder=encoder, encoder_status=encoder_status,
                       variant_project=edit.snapshot, variant_parent=edit.parent,
-                      variant_operation="combined_edit", variant_cuts=edit.cuts,
+                      variant_operation=operation, variant_cuts=edit.cuts,
                       variant_episode_base=edit.base_plan)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="combined-", dir=destination.parent) as scratch:
@@ -315,7 +466,7 @@ def render_combined_edit(
             raise Cancelled("Сохранение отменено")
         os.link(result, destination)
         save_variant(destination, project=edit.snapshot, plan=edit.plan,
-                     parent=edit.parent, operation="combined_edit", cuts=edit.cuts,
+                     parent=edit.parent, operation=operation, cuts=edit.cuts,
                      music=soundtrack[0] if soundtrack else None, bookend_cuts=bookends,
                      episode_base_plan=edit.base_plan)
     return destination

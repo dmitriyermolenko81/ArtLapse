@@ -169,8 +169,11 @@ def test_gui_cancel_then_delete_open_output_and_refresh(
             app.processEvents()
             sleep(0.01)
         assert window.job is None and not window.last_error
-        assert not video.exists() and window.variants.count() == 0
-        assert not window.cut_button.isVisible() and window.player.source().isEmpty()
+        assert not video.exists() and window.variants.count() == 1
+        assert Path(window.variants.itemData(0)) == project_root / "previews" / "готовый.mp4"
+        assert Path(window.variants.itemData(0)).is_file()
+        assert window.cut_button.isVisible() and window.player.source().isEmpty()
+        assert not window.cut_button.isChecked() and not window.output_editor.isVisible()
         assert window.cleanup_button.isEnabled()
         assert "Удалено файлов: 2" in window.status.text()
         assert (project_root.parent / "исходник.mp4").is_file()
