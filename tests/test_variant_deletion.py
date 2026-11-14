@@ -300,3 +300,111 @@ def test_deleting_keeps_geometry_during_worker_and_neighbour_reload(
             wait_job(window)
         window.close()
         app.processEvents()
+
+
+
+def test_batch_removes_selected_children_before_parents_and_keeps_others(project_root):
+    from sculptcut.variant_deletion import batch_variant_files, delete_variants
+
+    root = project_root
+    parent = root/'renders/готовый.mp4'
+    preview = root/'previews/готовый.mp4'
+    child = root/'previews/child.mp4'
+    child.write_bytes(parent.read_bytes())
+    save_variant(child, parent=parent, operation='cut', cuts=[(0, 100_000)])
+    other = root/'renders/keep.mp4'
+    other.write_bytes(parent.read_bytes())
+    originals = (root.parent/'исходник.mp4').read_bytes()
+    batch = batch_variant_files(root, [parent, child, preview])
+    order = [v for v, _ in batch]
+    assert order.index(child) < order.index(parent)
+    result = delete_variants(root, batch, Event(), lambda _: None)
+    assert not result.errors and not result.cancelled
+    assert all(not v.exists() for v in (parent, child, preview))
+    assert other.is_file() and (root.parent/'исходник.mp4').read_bytes() == originals
+
+
+def test_batch_preflight_checks_dependencies_changed_files_and_cancellation(project_root):
+    from sculptcut.variant_deletion import batch_variant_files, delete_variants
+
+    root = project_root
+    parent = root/'renders/готовый.mp4'
+    child = root/'previews/child.mp4'
+    child.write_bytes(parent.read_bytes())
+    save_variant(child, parent=parent, operation='cut', cuts=[(0, 100_000)])
+    with pytest.raises(ValueError, match='зависимую'):
+        batch_variant_files(root, [parent])
+    batch = batch_variant_files(root, [parent, child])
+    cancel = Event()
+    cancel.set()
+    assert delete_variants(root, batch, cancel, lambda _: None).cancelled
+    assert parent.exists() and child.exists()
+    child.write_bytes(child.read_bytes()+b'changed')
+    with pytest.raises(ValueError, match='изменился'):
+        delete_variants(root, batch, Event(), lambda _: None)
+    assert parent.exists() and child.exists()
+
+
+def test_failed_child_preserves_parent_and_metadata(project_root, monkeypatch):
+    from sculptcut.variant_deletion import batch_variant_files, delete_variants
+
+    root = project_root
+    parent = root/'renders/готовый.mp4'
+    child = root/'renders/child.mp4'
+    child.write_bytes(parent.read_bytes())
+    save_variant(child, parent=parent, operation='cut', cuts=[(0, 100_000)])
+    batch = batch_variant_files(root, [parent, child])
+    unlink = Path.unlink
+    def locked(path, missing_ok=False):
+        if path == child:
+            raise PermissionError('busy')
+        return unlink(path, missing_ok=missing_ok)
+    monkeypatch.setattr(Path, 'unlink', locked)
+    result = delete_variants(root, batch, Event(), lambda _: None)
+    assert result.errors and parent.exists() and child.exists()
+    assert metadata_path(child, '.variant.json').exists()
+    assert metadata_path(parent, '.variant.json').exists()
+
+
+def test_real_combo_hold_cancel_then_batch_trash(project_root, tmp_path):
+    from test_hold_selection import hold_range
+
+    root = project_root
+    first = root/'renders/готовый.mp4'
+    second = root/'previews/готовый.mp4'
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        window.show()
+        window.open_project_folder(root)
+        combo = window.variants
+        assert combo.count() == 2
+        combo.showPopup()
+        wait_until(app, combo.view().isVisible)
+        hold_range(combo.view(), 0, 1)
+        assert len(combo.selected_rows()) == 2
+        assert window.delete_variant_button.isEnabled()
+        combo.hidePopup()
+        def answer(yes):
+            box = window.findChild(QMessageBox, 'deleteVariantConfirmation')
+            assert box is not None
+            assert first.name in box.text()
+            if yes:
+                next(b for b in box.buttons() if box.buttonRole(b) ==
+                     QMessageBox.ButtonRole.DestructiveRole).click()
+            else:
+                box.button(QMessageBox.StandardButton.Cancel).click()
+        QTimer.singleShot(0, lambda: answer(False))
+        window.delete_variant_button.click()
+        assert first.exists() and second.exists() and window.job is None
+        assert len(combo.selected_rows()) == 2
+        assert window.grab().save(str(tmp_path/'selected-versions.png'))
+        QTimer.singleShot(0, lambda: answer(True))
+        window.delete_variant_button.click()
+        wait_job(window)
+        assert not first.exists() and not second.exists()
+        assert (root.parent/'исходник.mp4').exists()
+        assert combo.count() == 0
+    finally:
+        window.close()
+        app.processEvents()

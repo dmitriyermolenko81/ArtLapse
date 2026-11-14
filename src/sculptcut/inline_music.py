@@ -16,6 +16,8 @@ from sculptcut.music_edit import (
     assemble_music,
     draft_path,
     insert_music_clip,
+    music_edit_locked,
+    parse_music_clips,
 )
 from sculptcut.music_edit_dialog import MusicEditDialog, MusicJob
 from sculptcut.music_library import audio_duration
@@ -33,19 +35,23 @@ class InlineMusic(MusicEditDialog):
         self.video_lane = owner.montage_seek
         self.manual = False
         self.prepared_key: tuple[tuple[MusicClip, ...], int] | None = None
+        metadata = metadata_path(owner.video, '.music-edit.json')
+        saved = (parse_music_clips(json.loads(metadata.read_text(encoding='utf-8')))
+                 if not music_edit_locked(owner.video) and metadata.is_file() else None)
         super().__init__(owner.root, owner.video, owner, embedded=True)
         self.lane.compact_lane = True
         self.lane.show_ruler = False
-        self.lane.left_padding = 56
+        self.lane.left_padding = 30
         self.lane.lane_label = tr('Музыка')
+        self.lane.lane_icon = 'music'
+        self.lane.setAccessibleName(self.lane.lane_label)
+        self.lane.setToolTip(self.lane.lane_label + '\n' + self.lane.toolTip())
         self.lane.setFixedHeight(40)
         self.music_header.hide()
         self.volume_state = owner.volume_state
         self.volume_state.changed.connect(self.monitor)
         self.manual = not self.locked and draft_path(self.root, self.video).is_file()
-        metadata = metadata_path(self.video, '.music-edit.json')
-        self.baseline = ([MusicClip.model_validate(c) for c in json.loads(
-            metadata.read_text(encoding='utf-8'))] if not self.locked and metadata.is_file() else
+        self.baseline = (saved if saved is not None else
             [MusicClip(path=self.video, start_us=0, end_us=self.duration, at_us=0)]
             if probe(self.video).audio_streams else [])
         self.lane.source_titles[self.video] = tr('Звук ролика')

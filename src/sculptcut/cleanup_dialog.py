@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QDialog,
     QFrame,
@@ -12,12 +13,14 @@ from PySide6.QtWidgets import (
     QLabel,
     QLayout,
     QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from sculptcut.hold_selection import HoldSelection
 from sculptcut.i18n import tr
 from sculptcut.project_cleanup import Category, CleanupFile, format_bytes
 from sculptcut.project_deletion import ProjectFolder, project_deletion_target
@@ -113,6 +116,7 @@ class CleanupDialog(QDialog):
         summary_row.addWidget(self.details_button)
         layout.addLayout(summary_row)
         self.file_list = QListWidget()
+        self.file_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.file_list.setAccessibleName(tr("Файлы для удаления"))
         self.file_list.setFixedHeight(96)
         self.file_list.hide()
@@ -135,12 +139,36 @@ class CleanupDialog(QDialog):
         self.remove_button.clicked.connect(self.confirm_selection)
         actions.addWidget(self.remove_button)
         layout.addLayout(actions)
+        self.file_hold = HoldSelection(self.file_list, Qt.ItemDataRole.UserRole)
+        self.file_hold.changed.connect(self.update_selection_summary)
+        self.file_list.clicked.connect(self.select_file_group)
         self.refresh()
+
+    def select_file_group(self) -> None:
+        self.file_hold.active = True
+        videos = {item.data(Qt.ItemDataRole.UserRole)
+                  for item in self.file_list.selectedItems()}
+        self.file_hold.replace({i for i in range(self.file_list.count())
+            if self.file_list.item(i).data(Qt.ItemDataRole.UserRole) in videos})
+        self.update_selection_summary()
 
     def selected_files(self) -> tuple[CleanupFile, ...]:
         if self.delete_project.isChecked():
             return ()
-        return tuple(f for f in self.files if self.categories[f.category].isChecked())
+        available = tuple(f for f in self.files if self.categories[f.category].isChecked())
+        if hasattr(self, 'file_hold') and self.file_hold.active:
+            videos = {item.data(Qt.ItemDataRole.UserRole)
+                      for item in self.file_list.selectedItems()}
+            return tuple(f for f in available if str(f.video) in videos)
+        return available
+
+    def update_selection_summary(self) -> None:
+        files = self.selected_files()
+        self.summary.setText(tr("Проект будет закрыт") if self.delete_project.isChecked() else
+                             tr(f"{len(files)} файлов · {format_bytes(sum(f.size for f in files))}")
+                             if files else tr("Выберите, что удалить"))
+        self.remove_button.setEnabled(
+            (self.delete_project.isChecked() and self.project_target is not None) or bool(files))
 
     def toggle_details(self, expanded: bool) -> None:
         visible = expanded and bool(self.selected_files())
@@ -150,11 +178,13 @@ class CleanupDialog(QDialog):
         whole = self.delete_project.isChecked()
         for category, box in self.categories.items():
             box.setEnabled(not whole and any(f.category == category for f in self.files))
+        self.file_hold.reset()
         files = self.selected_files()
         self.file_list.clear()
-        self.file_list.addItems([
-            f"{f.path.relative_to(self.root)} · {format_bytes(f.size)}" for f in files
-        ])
+        for f in files:
+            item = QListWidgetItem(f"{f.path.relative_to(self.root)} · {format_bytes(f.size)}")
+            item.setData(Qt.ItemDataRole.UserRole, str(f.video))
+            self.file_list.addItem(item)
         self.summary.setText(tr("Проект будет закрыт") if whole else
                              tr(f"{len(files)} файлов · {format_bytes(sum(f.size for f in files))}")
                              if files else tr("Выберите, что удалить"))

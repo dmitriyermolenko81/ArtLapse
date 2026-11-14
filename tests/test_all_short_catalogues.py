@@ -46,6 +46,11 @@ def test_real_all_short_modes_use_full_catalogue_and_export(
     assert plan.settings["complete_short_catalogue"] == "short-catalogue-266"
     catalogue = json.loads((root / f"{preset}-work-episodes.json").read_text())["candidates"]
     assert len(catalogue) >= 10 and all(e["process_checked"] for e in catalogue)
+    from sculptcut.edit_stats import statistics_text
+
+    eligible = sum(bool(e['process_verified']) for e in catalogue)
+    assert eligible == plan.settings['short_candidates_verified']
+    assert f'После анализа: {eligible}' in statistics_text(plan)
     assert plan.settings["short_candidates_verified"] > 0
     assert all(not d.output_frame_count or d.source_end_us <= 12_000_000
                or d.source_start_us >= 16_000_000 for d in plan.decisions)

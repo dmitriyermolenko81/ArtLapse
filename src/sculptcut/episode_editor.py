@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QListView, QListWidget, QListWidgetItem, QMenu
 
 from sculptcut.combined_edits import apply_episode_edits
 from sculptcut.domain import Override, Project, ProjectSettings
+from sculptcut.hold_selection import HoldSelection
 from sculptcut.i18n import tr
 from sculptcut.planning import RenderDecision, RenderPlan
 from sculptcut.project import load_project, save_project
@@ -59,6 +60,8 @@ class EpisodeEditor(QListWidget):
         self.setWrapping(False)
         self.setFixedHeight(64)
         self.setSpacing(3)
+        self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.hold_selection = HoldSelection(self)
         self.setStyleSheet("""
             QListWidget { background:#181d26; border:1px solid #303949;
                           border-radius:6px; padding:3px; }
@@ -96,7 +99,9 @@ class EpisodeEditor(QListWidget):
     def context_menu(self, position: QPoint) -> None:
         item = self.itemAt(position)
         if item is not None:
-            self.setCurrentItem(item)
+            if not (self.hold_selection.active and item.isSelected()):
+                self.hold_selection.reset()
+                self.setCurrentItem(item)
             self.choose(item)
 
     def load(self, root: Path) -> None:
@@ -183,13 +188,15 @@ class EpisodeEditor(QListWidget):
         if self.plan is None or self.root is None:
             return
         menu = QMenu(self)
-        decision: RenderDecision = item.data(Qt.ItemDataRole.UserRole)
-        if decision.provenance == "user:shorts_manual_cut":
+        items = (self.selectedItems() if self.hold_selection.active and item.isSelected()
+                 else [item])
+        decisions = [i.data(Qt.ItemDataRole.UserRole) for i in items]
+        if any(d.provenance == "user:shorts_manual_cut" for d in decisions):
             menu.addAction(tr("Вырезано в подрезке ролика")).setEnabled(False)
             menu.aboutToHide.connect(menu.deleteLater)
             menu.popup(QCursor.pos())
             return
-        if decision.action in ("HOLD", "MONTAGE") or decision.sample_times_us:
+        if any(d.action in ("HOLD", "MONTAGE") or d.sample_times_us for d in decisions):
             menu.addAction(tr("Стоп-кадр: границы заданы монтажом")).setEnabled(False)
             menu.aboutToHide.connect(menu.deleteLater)
             menu.popup(QCursor.pos())
@@ -201,28 +208,31 @@ class EpisodeEditor(QListWidget):
         ):
             action = menu.addAction(label)
             action.triggered.connect(
-                lambda checked=False, choice=choice: self.apply_choice(item, choice)
+                lambda checked=False, choice=choice: self.apply_choices(items, choice)
             )
         menu.aboutToHide.connect(menu.deleteLater)
         menu.popup(QCursor.pos())
 
     def apply_choice(self, item: QListWidgetItem, choice: str) -> None:
+        self.apply_choices([item], choice)
+
+    def apply_choices(self, items: list[QListWidgetItem], choice: str) -> None:
         if self.plan is None or self.root is None or not self.isEnabled():
             return
-        d: RenderDecision = item.data(Qt.ItemDataRole.UserRole)
-        speed = (
-            (
-                (d.source_end_us - d.source_start_us)
-                * self.plan.output_fps
-                / (1_000_000 * d.output_frame_count)
-            )
-            if d.output_frame_count
-            else 8.0
-        )
-        speed = max(1.0, speed / 2 if choice == "slow" else speed)
         try:
             before = load_project(self.root)
-            project = edit_episode(before, d, None if choice == "drop" else speed)
+            project = before
+            updates = []
+            for item in items:
+                d: RenderDecision = item.data(Qt.ItemDataRole.UserRole)
+                if (d.provenance == 'user:shorts_manual_cut'
+                        or d.action in ('HOLD', 'MONTAGE') or d.sample_times_us):
+                    raise ValueError(tr('Стоп-кадр: границы заданы монтажом'))
+                speed = ((d.source_end_us-d.source_start_us)*self.plan.output_fps
+                         / (1_000_000*d.output_frame_count) if d.output_frame_count else 8.0)
+                speed = max(1.0, speed/2 if choice == 'slow' else speed)
+                project = edit_episode(project, d, None if choice == 'drop' else speed)
+                updates.append((item, d, speed))
             self.save_edit(
                 before,
                 project,
@@ -235,28 +245,16 @@ class EpisodeEditor(QListWidget):
                 if choice == "slow"
                 else tr("Оставлен")
             )
-            item.setText(state + "\n" + item.text().split("\n")[-1])
-            item.setIcon(ui_icon("check"))
-            # Repeated slowing operates on the latest selected speed.
-            item.setData(
-                Qt.ItemDataRole.UserRole,
-                d.model_copy(
-                    update={
-                        "output_frame_count": 0
-                        if choice == "drop"
-                        else max(
-                            1,
-                            round(
-                                (d.source_end_us - d.source_start_us)
-                                * self.plan.output_fps
-                                / 1_000_000
-                                / speed
-                            ),
-                        ),
-                    }
-                ),
-            )
-            item.setForeground(QColor("#8891a0" if choice == "drop" else "#bcd1ff"))
+            for item, d, speed in updates:
+                item.setText(state + "\n" + item.text().split("\n")[-1])
+                item.setIcon(ui_icon("check"))
+                # Repeated slowing operates on the latest selected speed.
+                item.setData(Qt.ItemDataRole.UserRole, d.model_copy(update={
+                    'output_frame_count': 0 if choice == 'drop' else max(1, round(
+                        (d.source_end_us-d.source_start_us)*self.plan.output_fps
+                        / 1_000_000/speed)),
+                }))
+                item.setForeground(QColor('#8891a0' if choice == 'drop' else '#bcd1ff'))
             self.changed.emit(tr("Правка сохранена. Нажмите «Создать ролик», чтобы применить её."))
         except (ValueError, OSError) as exc:
             self.failed.emit(str(exc))

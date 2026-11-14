@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from sculptcut.crop_dialog import preview_frame
+from sculptcut.hold_selection import HoldSelection
 from sculptcut.i18n import tr
 from sculptcut.media import probe
 from sculptcut.time_format import format_time
@@ -117,6 +118,7 @@ class SourceCards(QListWidget):
         self.setUniformItemSizes(True)
         self.setItemDelegate(SourceCardDelegate(self))
         self.setSpacing(4)
+        self.hold_selection = HoldSelection(self)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if dropped_video_paths(event.mimeData().urls()):

@@ -97,6 +97,7 @@ from sculptcut.edit_history import EditHistory
 from sculptcut.edit_stats import statistics_text
 from sculptcut.episode_panel import EpisodePanel, episode_export
 from sculptcut.export_storage import has_exports, ordered_exports
+from sculptcut.hold_selection import SelectionCombo
 from sculptcut.i18n import language, tr
 from sculptcut.localization import error_text, stage_text
 from sculptcut.logging_config import configure_logging
@@ -1142,7 +1143,7 @@ class MainWindow(QMainWindow):
         versions_title.setObjectName("sectionHint")
         versions_title.setToolTip(versions_description)
         versions_layout.addWidget(versions_title)
-        self.variants = QComboBox()
+        self.variants = SelectionCombo()
         self.variants.setObjectName("versionsChoice")
         self.variants.setProperty("controlRole", "menu")
         self.variants.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -1152,6 +1153,7 @@ class MainWindow(QMainWindow):
         self.variants.setToolTip(tr("Открыть одну из ранее созданных версий"))
         self.variants.activated.connect(self.open_variant)
         self.variants.currentIndexChanged.connect(self.update_variant_tooltip)
+        self.variants.bulk_selection_changed.connect(self.update_variant_tooltip)
         self.controls.append(self.variants)
         versions_layout.addWidget(self.variants, 1)
         self.delete_variant_button = self.button("", self.delete_selected_variant)
@@ -3117,18 +3119,30 @@ class MainWindow(QMainWindow):
         self.versions_panel.setVisible(self.variants.count() > 0)
 
     def update_variant_tooltip(self) -> None:
-        self.variants.setToolTip(str(self.variants.currentData() or tr("Выберите готовый ролик")))
+        rows = self.variants.selected_rows()
+        self.variants.setToolTip("\n".join(str(self.variants.itemData(row)) for row in rows)
+                                 or tr("Выберите готовый ролик"))
+        label = (tr('Удалить выбранные версии ({0})').format(len(rows)) if len(rows) > 1
+                 else tr('Удалить выбранную версию'))
+        self.delete_variant_button.setToolTip(label)
+        self.delete_variant_button.setAccessibleName(label)
         self.delete_variant_button.setEnabled(
-            self.job is None and bool(self.variants.currentData())
+            self.job is None and bool(self.variants.selected_rows())
         )
 
     def delete_selected_variant(self) -> None:
-        if self.job is not None or not self.variants.currentData():
+        rows = self.variants.selected_rows()
+        if self.job is not None or not rows:
             return
-        from sculptcut.variant_deletion import delete_variant, variant_files
+        from sculptcut.variant_deletion import (
+            batch_variant_files,
+            delete_variant,
+            delete_variants,
+        )
 
         root = Path(self.folder.text().strip()).resolve()
-        video = Path(self.variants.currentData()).absolute()
+        videos = [Path(self.variants.itemData(row)).absolute() for row in rows]
+        video = videos[0]
         inputs = self.source_paths() + [
             Path(field.text().strip()) for field in (self.music, self.intro_image)
             if field.text().strip()
@@ -3136,17 +3150,27 @@ class MainWindow(QMainWindow):
         if self.presentation_video is not None:
             inputs.append(self.presentation_video)
         try:
-            files = variant_files(root, video, inputs)
+            batch = batch_variant_files(root, videos, inputs)
+            files = batch[0][1] if len(videos) == 1 else ()
         except (OSError, ValueError) as exc:
             self.show_error(str(exc))
             return
-        dialog = QMessageBox(QMessageBox.Icon.Warning, tr("Удалить выбранную версию?"),
-                             video.name, QMessageBox.StandardButton.Cancel, self)
+        dialog = QMessageBox(QMessageBox.Icon.Warning,
+                             tr("Удалить выбранную версию?") if len(videos) == 1 else
+                             tr("Удалить выбранные версии ({0})?").format(len(videos)),
+                             "\n".join(path.name for path in videos[:3]) + (
+                                 "\n"+tr('Ещё: {0}').format(len(videos)-3)
+                                 if len(videos) > 3 else ''),
+                             QMessageBox.StandardButton.Cancel, self)
         dialog.setObjectName("deleteVariantConfirmation")
+        if len(videos) > 3:
+            dialog.setDetailedText("\n".join(str(path) for path in videos))
         dialog.setInformativeText(tr(
             "MP4 и история этой версии будут удалены с диска. "
             "Исходники и другие версии останутся."
-        ))
+        ) if len(videos) == 1 else tr(
+            'Выбранные MP4 и их история будут удалены с диска. '
+            'Исходники и невыбранные версии останутся.'))
         remove = dialog.addButton(tr("Удалить"), QMessageBox.ButtonRole.DestructiveRole)
         dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
         style_message_box(dialog)
@@ -3156,15 +3180,21 @@ class MainWindow(QMainWindow):
         if not confirmed:
             return
         current = self.player.source().toLocalFile()
-        was_current = bool(current and Path(current).resolve() == video)
+        editing_video = getattr(self.selection_dialog, 'video', None)
+        was_current = bool(current and Path(current).resolve() in videos) or (
+            isinstance(editing_video, Path) and editing_video.resolve() in videos)
         if was_current:
+            if self.selection_dialog is not None:
+                self.selection_dialog.reject()
             self.clear_final_view()  # Release the MP4 handle before unlinking on Windows.
             self.edit_history.clear()
 
         def operation(cancel: Event, progress: Callable[[float], None],
                       stage: Callable[[str], None]) -> str:
             stage(tr("Удаление выбранной версии…"))
-            result = delete_variant(root, video, files, cancel, progress, inputs)
+            result = (delete_variant(root, video, files, cancel, progress, inputs)
+                      if len(videos) == 1 else
+                      delete_variants(root, batch, cancel, progress, inputs))
             return json.dumps({"errors": result.errors, "cancelled": result.cancelled})
 
         def refresh() -> None:
@@ -3181,7 +3211,8 @@ class MainWindow(QMainWindow):
                 self.show_error("\n".join(result["errors"]))
             else:
                 self.status.setText(tr("Удаление отменено.") if result["cancelled"]
-                                    else tr("Выбранная версия удалена."))
+                                    else tr("Выбранная версия удалена.") if len(videos) == 1
+                                    else tr("Удалено версий: {0}").format(len(videos)))
 
         def failed(message: str) -> None:
             refresh()
@@ -3395,6 +3426,7 @@ class MainWindow(QMainWindow):
             self.fit_video_frame()
         dialog.preview_image.connect(preview)
         dialog.music_message.connect(self.status.setText)
+        dialog.status_message.connect(self.status.setText)
         def bind_preview_controls() -> None:
             def edit_statistics() -> None:
                 from sculptcut.selection_duration import timeline_frames
@@ -3408,7 +3440,8 @@ class MainWindow(QMainWindow):
             edit_statistics()
             def quick_busy(busy: bool) -> None:
                 label = tr("Готовим быструю перемотку…")
-                if busy and self.job is None:
+                if (busy and self.job is None
+                        and self.status.text() != dialog.message.text()):
                     self.status.setText(label)
                 elif self.status.text() == label:
                     self.status.setText("")
@@ -3427,7 +3460,8 @@ class MainWindow(QMainWindow):
             clock(dialog.montage_seek.value())
             def preparing(busy: bool) -> None:
                 if busy:
-                    self.status.setText(tr("Готовим просмотр с курсора…"))
+                    if self.status.text() != dialog.message.text():
+                        self.status.setText(tr("Готовим просмотр с курсора…"))
                     self.playback_state_changed(QMediaPlayer.PlaybackState.PlayingState
                         if dialog.sequence.desired else QMediaPlayer.PlaybackState.PausedState)
                 elif self.status.text() == tr("Готовим просмотр с курсора…"):

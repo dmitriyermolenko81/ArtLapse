@@ -56,6 +56,8 @@ def restore_draft(root: Path, video: Path, session: SourceSelection) -> None:
     if not path.is_file():
         return
     data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError('Повреждённый черновик подрезки.')
     stat = video.stat()
     current = load_project(root)
     if data.get('expected_splits', {}) != current.source_splits:

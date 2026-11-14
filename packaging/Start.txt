@@ -1,4 +1,4 @@
-﻿ArtLapse 0.1.3 — первый запуск / First run
+﻿ArtLapse 0.1.4 — первый запуск / First run
 
 РУССКИЙ
 1. Распакуйте всю папку и запустите ArtLapse.exe. Установка Python не нужна.
@@ -20,7 +20,7 @@ Ctrl+Z / Ctrl+Y — отменить / вернуть, Пробел — восп
 папку data из предыдущей версии, если хотите сохранить настройки.
 Не перемещайте исходники и проекты. Проверка обновлений — кнопка круговой стрелки.
 Не переносите только EXE: _internal и bin должны оставаться рядом.
-Справка: https://github.com/dmitriyermolenko81/ArtLapse/blob/v0.1.3/README.ru.md
+Справка: https://github.com/dmitriyermolenko81/ArtLapse/blob/v0.1.4/README.ru.md
 
 ENGLISH
 1. Extract the entire ZIP and run ArtLapse.exe. Python, Qt and FFmpeg are included.
@@ -40,7 +40,7 @@ Extract a new release into a separate folder. Close ArtLapse and copy the previo
 data folder if you want to retain preferences. Keep projects and original media
 in place. Use the circular-arrow button to check for updates.
 Keep _internal and bin beside ArtLapse.exe. Do not move just the executable.
-Guide: https://github.com/dmitriyermolenko81/ArtLapse/blob/v0.1.3/README.md
+Guide: https://github.com/dmitriyermolenko81/ArtLapse/blob/v0.1.4/README.md
 
 LICENSES
 Free personal and commercial use under the included LICENSE. The application is

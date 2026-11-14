@@ -95,7 +95,7 @@ def test_native_colored_edits_statistics_draft_reopen_and_short_export(roll_movi
         dialog.refresh()
         assert _episode_count(dialog.session.plan) == dialog.montage.count()
         assert window.statistics.isVisible()
-        assert f'Эпизодов: {dialog.montage.count()}' in window.statistics.text()
+        assert f'В ролике: {dialog.montage.count()}' in window.statistics.text()
         assert f'Ролик: {format_time(5.5)}' in window.statistics.text()
         changes = dialog.montage_seek.edits
         assert {m.kind for m in changes} == {'removed', 'added'}

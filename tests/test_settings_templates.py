@@ -164,6 +164,36 @@ def test_real_toolbar_cancel_creation_keeps_selection_and_library(cancel: str) -
         app.processEvents()
 
 
+def test_anchored_templates_popup_keeps_group_for_trash():
+    from test_hold_selection import hold_range
+
+    app = QApplication.instance() or QApplication([])
+    owner = MainWindow()
+    values = [SettingsTemplate(name=name, options=owner.template_options())
+              for name in ('One', 'Two', 'Keep')]
+    owner.recent_settings.setValue(TEMPLATES_KEY,
+                                  TemplateLibrary(templates=values).model_dump_json())
+    owner.show()
+
+    def select_and_delete(dialog):
+        dialog.items.showPopup()
+        wait_until(app, dialog.items.view().isVisible)
+        hold_range(dialog.items.view(), 0, 1)
+        assert dialog.isVisible() and len(dialog.items.selected_rows()) == 2
+        dialog.items.hidePopup()
+        assert dialog.isVisible() and dialog.delete_button.isEnabled()
+        confirmation(dialog, True, dialog.delete_button.click)
+        assert [t.name for t in dialog.library.templates] == ['Keep']
+
+    try:
+        open_templates(owner, select_and_delete)
+        assert [t.name for t in read_templates(str(
+            owner.recent_settings.value(TEMPLATES_KEY))).templates] == ['Keep']
+    finally:
+        owner.close()
+        app.processEvents()
+
+
 @pytest.mark.parametrize("preset", PRESETS)
 def test_real_toolbar_apply_all_modes_and_save_selected_options(
     episode_project: tuple[Path, Project, RenderPlan], preset: str, tmp_path: Path,
@@ -318,5 +348,39 @@ def test_write_failure_keeps_previous_template_library(tmp_path: Path) -> None:
         assert json.loads(str(settings.value(TEMPLATES_KEY)))["templates"][0]["name"] == "Old"
     finally:
         dialog.reject()
+        owner.close()
+        app.processEvents()
+
+
+
+def test_hold_selects_multiple_templates_for_one_delete_confirmation(tmp_path):
+    from test_hold_selection import hold_range
+
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(str(tmp_path/'batch.ini'), QSettings.Format.IniFormat)
+    owner = MainWindow()
+    dialog = TemplateDialog(settings, owner.template_options, owner)
+    try:
+        # Use the normal saving workflow to create real persistent templates.
+        for name in ('one', 'two', 'keep'):
+            dialog.start_create()
+            dialog.name.setText(name)
+            dialog.save_current()
+        assert len(dialog.library.templates) == 3
+        dialog.show()
+        dialog.items.showPopup()
+        wait_until(app, dialog.items.view().isVisible)
+        hold_range(dialog.items.view(), 0, 1)
+        dialog.items.hidePopup()
+        assert len(dialog.items.selected_rows()) == 2
+        assert not dialog.apply_button.isEnabled() and dialog.delete_button.isEnabled()
+        confirmation(dialog, False, dialog.delete_selected)
+        assert len(dialog.library.templates) == 3
+        confirmation(dialog, True, dialog.delete_selected)
+        assert [t.name for t in dialog.library.templates] == ['keep']
+        stored = read_templates(str(settings.value(TEMPLATES_KEY)))
+        assert [t.name for t in stored.templates] == ['keep']
+    finally:
+        dialog.close()
         owner.close()
         app.processEvents()

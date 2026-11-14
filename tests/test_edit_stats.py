@@ -38,7 +38,7 @@ def test_statistics_show_timelapse_episode_count_for_selected_duration() -> None
         story="static_episodes",
         episode_count=99,
     )
-    assert "Эпизодов: 2" in statistics_text(plan)
+    assert "В ролике: 2" in statistics_text(plan)
 
 
 def test_statistics_count_each_numbered_timeline_block() -> None:
@@ -50,7 +50,7 @@ def test_statistics_count_each_numbered_timeline_block() -> None:
             _decision(10_000_000, 12_000_000, "SPEED", "another"),
         ]
     )
-    assert "Эпизодов: 3" in statistics_text(plan)
+    assert "В ролике: 3" in statistics_text(plan)
 
 
 def test_statistics_count_music_stills_as_distinct_episodes() -> None:
@@ -62,7 +62,7 @@ def test_statistics_count_music_stills_as_distinct_episodes() -> None:
         ],
         preset="beat_shorts",
     )
-    assert "Эпизодов: 2" in statistics_text(plan)
+    assert "В ролике: 2" in statistics_text(plan)
 
 
 def test_statistics_count_short_highlights_and_final_episode() -> None:
@@ -74,7 +74,7 @@ def test_statistics_count_short_highlights_and_final_episode() -> None:
         ],
         preset="shorts",
     )
-    assert "Эпизодов: 2" in statistics_text(plan)
+    assert "В ролике: 2" in statistics_text(plan)
 
 
 def test_statistics_count_process_shorts_episodes_after_crop_splitting() -> None:
@@ -89,4 +89,27 @@ def test_statistics_count_process_shorts_episodes_after_crop_splitting() -> None
         ],
         preset="shorts",
     )
-    assert "Эпизодов: 4" in statistics_text(plan)
+    assert "В ролике: 4" in statistics_text(plan)
+
+
+def test_analyzed_count_is_not_selected_count_or_raw_partition():
+    decisions = [_decision(0, 5_000_000, 'SPEED', 'one')]
+    for preset, key in (('timelapse', 'work_verified_count'),
+                        ('shorts', 'short_candidates_verified'),
+                        ('music_shorts', 'short_candidates_verified'),
+                        ('photoshop_shorts', 'short_candidates_verified')):
+        plan = _plan(decisions, preset=preset, **{key: 84},
+                     work_candidate_count=120, source_episode_count=300)
+        text = statistics_text(plan)
+        assert 'После анализа: 84' in text and 'В ролике: 1' in text
+        split = plan.model_copy(update={'decisions': [*decisions, *decisions]})
+        assert 'После анализа: 84' in statistics_text(split)
+        assert 'В ролике: 2' in statistics_text(split)
+
+
+def test_missing_invalid_and_zero_analyzed_counts_are_distinct():
+    decisions = [_decision(0, 5_000_000, 'SPEED', 'one')]
+    assert 'После анализа: —' in statistics_text(_plan(decisions, source_episode_count=300))
+    assert 'После анализа: —' in statistics_text(_plan(decisions, work_verified_count=-1))
+    assert 'После анализа: —' in statistics_text(_plan(decisions, work_verified_count='bad'))
+    assert 'После анализа: 0' in statistics_text(_plan(decisions, work_verified_count=0))

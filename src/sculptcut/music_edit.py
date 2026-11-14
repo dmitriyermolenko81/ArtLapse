@@ -69,8 +69,17 @@ LOCKED_MUSIC_REASON = ('Музыка привязана к ритму. Ручн�
 
 def music_edit_locked(video: Path) -> bool:
     state = read_variant(video)
-    preset = ((state.get('project') or {}).get('settings', {}).get('preset')
-              or (state.get('plan') or {}).get('settings', {}).get('preset'))
+    preset = None
+    for field in ('project', 'plan'):
+        snapshot = state.get(field) or {}
+        settings = snapshot.get('settings', {})
+        if not isinstance(settings, dict):
+            raise ValueError('Повреждённая история настроек ролика.')
+        preset = settings.get('preset')
+        if preset is not None and not isinstance(preset, str):
+            raise ValueError('Повреждённый режим ролика.')
+        if preset:
+            break
     return preset in MUSIC_SHORTS_PRESETS
 
 
@@ -115,11 +124,27 @@ def load_draft(root: Path, video: Path) -> list[MusicClip]:
     if not path.is_file():
         return []
     data = json.loads(path.read_text(encoding='utf-8'))
+    if not isinstance(data, dict) or not all(
+            key in data for key in ('version', 'video', 'size', 'mtime_ns', 'clips')):
+        raise ValueError('Повреждённый музыкальный черновик.')
     stat = video.stat()
     if (data['version'] != 1 or data['video'] != str(video.resolve())
             or data['size'] != stat.st_size or data['mtime_ns'] != stat.st_mtime_ns):
         raise ValueError('Музыкальный черновик относится к другой версии видео.')
-    return [MusicClip.model_validate(c) for c in data['clips']]
+    return parse_music_clips(data['clips'])
+
+
+def parse_music_clips(data: object) -> list[MusicClip]:
+    """Validate persisted lanes without discarding intentional tails or silence."""
+    if not isinstance(data, list):
+        raise ValueError('Повреждённый список музыкальных фрагментов.')
+    clips = [MusicClip.model_validate(c) for c in data]
+    end = 0
+    for clip in sorted(clips, key=lambda c: c.at_us):
+        if clip.at_us < end:
+            raise ValueError('Музыкальные фрагменты не должны перекрываться.')
+        end = clip.at_us+clip.end_us-clip.start_us
+    return clips
 
 
 def assemble_music(root: Path, clips: list[MusicClip], duration_us: int,

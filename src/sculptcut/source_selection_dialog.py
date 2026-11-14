@@ -60,7 +60,7 @@ from sculptcut.planning import RenderPlan
 from sculptcut.playback_volume import PlaybackVolume, VolumeControl
 from sculptcut.project import load_project
 from sculptcut.proxy import proxy_path
-from sculptcut.review_timeline import ReviewTimeline
+from sculptcut.review_timeline import ReviewTimeline, video_piece
 from sculptcut.scrub_frames import ScrubFrames
 from sculptcut.selection_duration import selection_frames, timeline_frames, timeline_start
 from sculptcut.selection_history import (
@@ -75,7 +75,6 @@ from sculptcut.shorts_refill import cuts_on_plan_clock
 from sculptcut.simple_timeline import EditMarker, SimpleTimeline
 from sculptcut.source_selection import SourceSelection
 from sculptcut.time_format import format_time
-from sculptcut.timeline_appearance import LanePiece
 from sculptcut.timewarp import output_before, source_time
 from sculptcut.ui_icons import ui_icon
 from sculptcut.ui_theme import apply_dialog_theme
@@ -155,6 +154,7 @@ class SelectionLoader(QThread):
 class SourceSelectionDialog(QDialog):
     music_changed = Signal()
     music_message = Signal(str)
+    status_message = Signal(str)
     ready = Signal()
     preview_image = Signal(QImage)
     apply_requested = Signal()
@@ -190,9 +190,12 @@ class SourceSelectionDialog(QDialog):
         self.context_serial = 0
         self.frame_image = QImage()
         self.layout_box = QVBoxLayout(self)
-        self.message = QLabel(tr("Загружаем монтаж и исходники…"))
+        self.message = QLabel(tr("Загружаем монтаж и исходники…"), self)
         self.message.setWordWrap(True)
-        self.layout_box.addWidget(self.message)
+        if self.compact:
+            self.message.hide()
+        else:
+            self.layout_box.addWidget(self.message)
         self.body = QWidget()
         self.body.setObjectName("selectionBody")
         self.layout_box.addWidget(self.body, 1)
@@ -203,13 +206,23 @@ class SourceSelectionDialog(QDialog):
         self.loader = SelectionLoader(root, video, list(cuts or []), compact)
         _loaders.add(self.loader)
         self.loader.ready.connect(self.loaded)
-        self.loader.failed.connect(self.message.setText)
+        self.loader.failed.connect(self.set_message)
         self.loader.finished.connect(lambda: _loaders.discard(self.loader))
         self.loader.finished.connect(self.loader.deleteLater)
         app = QCoreApplication.instance()
         if app:
             app.aboutToQuit.connect(self.wait_loader)
         QTimer.singleShot(0, self.loader.start)
+
+    def set_message(self, message: str) -> None:
+        self.message.setText(message)
+        if self.compact:
+            self.message.hide()
+            self.status_message.emit(message)
+
+    def show_message(self) -> None:
+        if not self.compact:
+            self.message.show()
 
     def wait_loader(self) -> None:
         if self.loading and self.loader in _loaders:
@@ -491,7 +504,7 @@ class SourceSelectionDialog(QDialog):
             manual.addWidget(button)
         self.layout_box.addWidget(self.manual_tools)
         self.manual_tools.hide()
-        self.message.setText(
+        self.set_message(
             tr(
                 "Клик по дорожке показывает кадр. Начало и конец меняются только "
                 "за жёлтые ручки; во время движения виден кадр у границы."
@@ -594,17 +607,21 @@ class SourceSelectionDialog(QDialog):
             self.picture.setMinimumHeight(100)
             self.montage.setFixedHeight(90)
         if session.restore_note:
-            self.message.setText(session.restore_note)
-            self.message.show()
+            self.set_message(session.restore_note)
+            self.show_message()
         if self.compact and isinstance(self.montage_seek, SimpleTimeline):
             self.montage_seek.follow(self.montage_seek.value(), self.montage.currentRow())
         if self.modern:
             assert isinstance(self.montage_seek, ReviewTimeline)
             self.montage_seek.compact_lane = True
-            self.montage_seek.left_padding = 56
+            self.montage_seek.left_padding = 30
             self.montage_seek.lane_label = tr('Видео')
-            self.montage_seek.marker_y = 56
-            self.montage_seek.setFixedHeight(62)
+            self.montage_seek.lane_icon = 'video'
+            self.montage_seek.setAccessibleName(self.montage_seek.lane_label)
+            self.montage_seek.setToolTip(
+                self.montage_seek.lane_label + '\n' + self.montage_seek.toolTip())
+            self.montage_seek.marker_y = 46
+            self.montage_seek.setFixedHeight(52)
             try:
                 self.music_track = InlineMusic(self)
                 music = self.music_track
@@ -626,8 +643,8 @@ class SourceSelectionDialog(QDialog):
                 self.hover_keys = HoverTimelineKeys(self)
                 self.apply.setEnabled(self.session.changed or self.music_track.changed)
             except (OSError, ValueError, RuntimeError) as exc:
-                self.message.setText(tr(str(exc)))
-                self.message.show()
+                self.set_message(tr(str(exc)))
+                self.show_message()
         self.ready.emit()
         if self.compact:
             self.scrub_frames.prepare_video(self.video)
@@ -669,12 +686,8 @@ class SourceSelectionDialog(QDialog):
                                              round(float(clock + duration) * 1000)))
             if isinstance(self.montage_seek, ReviewTimeline):
                 source = next(s for s in self.session.project.sources if s.id == d.source_id)
-                self.montage_seek.pieces.append(LanePiece(self.montage.count(),
-                    float(clock)*1000, float(clock+duration)*1000,
-                    f'{self.montage.count()+1} · {source.path.stem}',
-                    f'{format_time(d.source_start_us/1e6, 1)} – '
-                    f'{format_time(d.source_end_us/1e6, 1)}', str(self.montage.count()+1),
-                    tr('{0} с').format(f'{float(duration):.1f}')))
+                self.montage_seek.pieces.append(video_piece(
+                    self.montage.count(), float(clock)*1000, d, plan.output_fps, source.path.name))
             item = QListWidgetItem(
                 f"{self.montage.count() + 1} · "
                 f"{format_time(clock, 1)}–{format_time(clock + duration, 1)}"
@@ -907,7 +920,7 @@ class SourceSelectionDialog(QDialog):
         try:
             self.session.source_bounds(self.sources.currentData(), start, end)
         except ValueError as exc:
-            self.message.setText(str(exc))
+            self.set_message(str(exc))
             return
         self.stop_context()
         self.sequence.stop()
@@ -1282,8 +1295,8 @@ class SourceSelectionDialog(QDialog):
 
     def sequence_busy(self, busy: bool) -> None:
         if busy:
-            self.message.setText(tr("Готовим просмотр с курсора…"))
-            self.message.show()
+            self.set_message(tr("Готовим просмотр с курсора…"))
+            self.show_message()
         elif self.compact:
             self.message.hide()
 
@@ -1360,11 +1373,11 @@ class SourceSelectionDialog(QDialog):
             self.refresh()
             self.edit_focus = sid, a
             self.refocus(sid, a)
-            self.message.setText(
+            self.set_message(
                 tr("Правка готова. Сохраните изменения, когда закончите редактирование.")
             )
         except ValueError as exc:
-            self.message.setText(str(exc))
+            self.set_message(str(exc))
 
     def refocus(self, source_id: str, timestamp: int) -> None:
         candidates = []
@@ -1393,7 +1406,7 @@ class SourceSelectionDialog(QDialog):
             self.session.fit_duration()
             self.refresh()
         except ValueError as exc:
-            self.message.setText(str(exc))
+            self.set_message(str(exc))
 
     def toggle_play(self) -> None:
         if self.scrub_timer.isActive():
@@ -1440,7 +1453,7 @@ class SourceSelectionDialog(QDialog):
         try:
             preview = self.pending_selection()
         except ValueError as exc:
-            self.message.setText(str(exc))
+            self.set_message(str(exc))
             return
         self.preview_plan = preview.plan
         a = round(self.start.value() * 1e6)
@@ -1476,7 +1489,7 @@ class SourceSelectionDialog(QDialog):
                 )
             )
         if any(preview.plan.decisions[i].action == "MONTAGE" for i in rows):
-            self.message.setText(
+            self.set_message(
                 tr("Для проверки выберите рабочую сцену перед финальным стоп-кадром.")
             )
             return
@@ -1499,7 +1512,7 @@ class SourceSelectionDialog(QDialog):
             if settings.music_path
             else None
         )
-        self.message.setText(tr("Готовим короткий просмотр склеек…"))
+        self.set_message(tr("Готовим короткий просмотр склеек…"))
         size = (540, 960) if settings.preset in SHORTS_PRESETS else (960, 540)
         self.preparer.request(shorts_scenes(tuple(scenes), preview.project, size, plan.output_fps),
                               plan.output_fps, size, audio)
@@ -1513,7 +1526,7 @@ class SourceSelectionDialog(QDialog):
         self.playback.player.setPlaybackRate(1)
         self.playback.select(clip.path, 0, clip.spans[-1][1], 0)
         self.refresh_audio()
-        self.message.setText(tr("Просмотр склеек с музыкой — временный фрагмент."))
+        self.set_message(tr("Просмотр склеек с музыкой — временный фрагмент."))
         self.playback.play()
 
     def finished_preview(self) -> None:
@@ -1568,8 +1581,8 @@ class SourceSelectionDialog(QDialog):
     def fail(self, message: str) -> None:
         if not self.closed:
             self.stop_context()
-            self.message.setText(message)
-            self.message.show()
+            self.set_message(message)
+            self.show_message()
 
     def shutdown(self) -> None:
         if self.closed:

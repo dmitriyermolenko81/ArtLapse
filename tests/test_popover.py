@@ -4,6 +4,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QSettings, Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QWidget
+from test_episode_panel import wait_until
 
 from sculptcut.feedback_dialog import FeedbackDialog
 from sculptcut.popover import exec_anchored
@@ -42,6 +43,7 @@ def test_popup_source_menu_can_apply_without_dismissing_panel(
             dialog.video.showPopup()
             app.processEvents()
             view = dialog.video.view()
+            wait_until(app, view.isVisible)
             assert view.isVisible()
             index = view.model().index(1, 0)
             QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton,

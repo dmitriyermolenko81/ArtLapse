@@ -34,6 +34,11 @@ def test_inline_lanes_focus_history_shared_clock_and_audition(music_movie):
         assert music.isVisible() and not music.isWindow()
         assert source.montage_seek.height()+music.height() <= 112
         assert music.lane.height() == 40 and not music.lane.show_ruler
+        assert music.lane.left_padding == source.montage_seek.left_padding == 30
+        assert music.lane.lane_icon == 'music'
+        assert source.montage_seek.lane_icon == 'video'
+        assert music.lane.accessibleName() == music.lane.lane_label
+        assert source.montage_seek.lane_label in source.montage_seek.toolTip()
         assert window.video.height() >= 300
         assert music.lane.mapTo(window, QPoint()).y() > source.montage_seek.mapTo(
             window, QPoint()).y()

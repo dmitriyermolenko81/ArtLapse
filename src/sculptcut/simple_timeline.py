@@ -48,6 +48,7 @@ class SimpleTimeline(MontageTimeline):
         self.compact_lane = False
         self.show_ruler = True
         self.lane_label = ''
+        self.lane_icon = ''
         self.drag_edge = ""
         self.drag_row = 0
         self.drag_time = 0
@@ -350,7 +351,7 @@ class SimpleTimeline(MontageTimeline):
             if edge.startswith("movie"):
                 self.movie_commit.emit(self.movie_start, self.movie_end)
                 self.movie_start, self.movie_end = 0, 0
-                self.view_start = self.view_span = 0
+                self.set_view(0, self.maximum())
             else:
                 self.edge_commit.emit(self.drag_row, edge, self.drag_time)
             self.update()

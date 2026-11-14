@@ -8,7 +8,12 @@ from threading import Event
 from sculptcut.combined_edits import CombinedEdit
 from sculptcut.export_storage import metadata_path
 from sculptcut.media import probe
-from sculptcut.music_edit import MusicClip, apply_music_edit, music_edit_locked
+from sculptcut.music_edit import (
+    MusicClip,
+    apply_music_edit,
+    music_edit_locked,
+    parse_music_clips,
+)
 
 
 def audible_clips(clips: list[MusicClip], duration_us: int) -> list[MusicClip]:
@@ -25,7 +30,7 @@ def saved_music_clips(video: Path) -> list[MusicClip] | None:
         return [MusicClip(path=video, start_us=0, end_us=info.duration_us, at_us=0)] if (
             info.audio_streams) else []
     path = metadata_path(video, '.music-edit.json')
-    return ([MusicClip.model_validate(c) for c in json.loads(path.read_text(encoding='utf-8'))]
+    return (parse_music_clips(json.loads(path.read_text(encoding='utf-8')))
             if path.is_file() else None)
 
 

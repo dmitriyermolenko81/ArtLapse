@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from sculptcut.compact_label import CompactLabel
+from sculptcut.hold_selection import SelectionCombo
 from sculptcut.i18n import tr
 from sculptcut.settings_templates import (
     SettingsTemplate,
@@ -48,7 +49,7 @@ class TemplateDialog(QDialog):
         layout.setSpacing(4)
         selection_row = QHBoxLayout()
         selection_row.setSpacing(4)
-        self.items = QComboBox()
+        self.items = SelectionCombo()
         self.items.setProperty("controlRole", "menu")
         self.items.setAccessibleName(tr("Сохранённые шаблоны"))
         self.items.setPlaceholderText(tr("Нет шаблонов"))
@@ -101,6 +102,7 @@ class TemplateDialog(QDialog):
             self.readable = False
             self.set_message(str(exc))
         self.save_button.setEnabled(self.readable)
+        self.items.bulk_selection_changed.connect(lambda: self.selected(self.items.currentIndex()))
         self.refresh()
 
     def set_message(self, message: str) -> None:
@@ -124,8 +126,10 @@ class TemplateDialog(QDialog):
 
     def selected(self, row: int) -> None:
         valid = 0 <= row < len(self.library.templates)
-        self.apply_button.setEnabled((valid or self.creating) and self.readable)
-        self.delete_button.setEnabled(valid and self.readable and not self.creating)
+        self.apply_button.setEnabled((valid or self.creating) and self.readable
+                                     and (self.creating or len(self.items.selected_rows()) == 1))
+        self.delete_button.setEnabled(bool(self.items.selected_rows()) and self.readable
+                                      and not self.creating)
         if valid:
             self.items.setToolTip(self.items.itemData(row, Qt.ItemDataRole.ToolTipRole))
         else:
@@ -225,11 +229,16 @@ class TemplateDialog(QDialog):
         row = self.items.currentIndex()
         if not self.readable or not 0 <= row < len(self.library.templates):
             return
-        template = self.library.templates[row]
-        if not self.confirm(tr("Удалить шаблон?"), template.name, tr("Удалить")):
+        templates = [self.library.templates[i] for i in self.items.selected_rows()
+                     if 0 <= i < len(self.library.templates)]
+        if not templates:
+            return
+        if not self.confirm(tr("Удалить шаблон?") if len(templates) == 1 else
+                            tr("Удалить выбранные шаблоны?"),
+                            "\n".join(t.name for t in templates), tr("Удалить")):
             return
         try:
-            self.store([t for t in self.library.templates if t.id != template.id])
+            self.store([t for t in self.library.templates if t.id not in {v.id for v in templates}])
             if not self.library.templates:
                 self.name.clear()
             self.set_message("")
@@ -237,7 +246,10 @@ class TemplateDialog(QDialog):
             self.set_message(str(exc))
 
     def apply_selected(self) -> None:
-        row = self.items.currentIndex()
+        rows = self.items.selected_rows()
+        if len(rows) != 1:
+            return
+        row = rows[0]
         if self.readable and 0 <= row < len(self.library.templates):
             self.chosen = self.library.templates[row]
             self.accept()

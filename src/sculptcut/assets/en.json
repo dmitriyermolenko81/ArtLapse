@@ -995,5 +995,21 @@
   "Убрать плавное начало": "Remove fade in",
   "Убрать затухание": "Remove fade out",
   "Плавность музыки": "Music fades",
-  "Не удалось построить звуковую волну: {name}": "Could not create audio waveform: {name}"
+  "Не удалось построить звуковую волну: {name}": "Could not create audio waveform: {name}",
+  "Кадр исходника: {0}": "Source frame: {0}",
+  "Серия кадров: {0}": "Frame sequence: {0}",
+  "В исходнике: {0}": "In source: {0}",
+  "В ролике: {0}–{1} · {2} с": "In video: {0}–{1} · {2} s",
+  "Эпизод {0}": "Episode {0}",
+  "Кадры": "Frames",
+  "Стоп": "Still",
+  "Монтаж · Исходники: {0} · Вырезано: {1} ({2}%) · Оставлено: {3} · Ролик: {4} · После анализа: {5} · В ролике: {6}": "Edit \u00b7 Sources: {0} \u00b7 Removed: {1} ({2}%) \u00b7 Retained: {3} \u00b7 Output: {4} \u00b7 After analysis: {5} \u00b7 In video: {6}",
+  "Удерживайте ЛКМ и ведите по списку для выбора нескольких.": "Hold the left mouse button and drag through the list to select multiple items.",
+  "Выбрано: {0}": "Selected: {0}",
+  "Удалить выбранные версии ({0})": "Delete selected versions ({0})",
+  "Удалить выбранные версии ({0})?": "Delete selected versions ({0})?",
+  "Выбранные MP4 и их история будут удалены с диска. Исходники и невыбранные версии останутся.": "The selected MP4 files and their history will be deleted from disk. Sources and unselected versions will remain.",
+  "Удалено версий: {0}": "Versions deleted: {0}",
+  "Ещё: {0}": "More: {0}",
+  "Удалить выбранные шаблоны?": "Delete selected templates?"
 }

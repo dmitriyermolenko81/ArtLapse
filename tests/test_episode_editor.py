@@ -65,3 +65,44 @@ def test_menu_persists_slow_drop_and_restore(tmp_path: Path) -> None:
     finally:
         editor.close()
         app.processEvents()
+
+
+def test_hold_episode_group_saves_once_and_rejects_dropping_everything(tmp_path):
+    from test_hold_selection import hold_range
+
+    app = QApplication.instance() or QApplication([])
+    project = Project(
+        sources=[make_source(i, i*10_000_000, 10_000_000) for i in range(3)],
+        settings=ProjectSettings(preset='speed', final_view_seconds=0),
+    )
+    save_project(tmp_path, project)
+    plan = build_plan(project, [], 6)
+    (tmp_path/'render_plan.json').write_text(plan.model_dump_json(), encoding='utf-8')
+    editor = EpisodeEditor()
+    editor.validate_edits = True
+    editor.load(tmp_path)
+    editor.resize(500, 64)
+    editor.show()
+    app.processEvents()
+    saved, errors = [], []
+    editor.edit_saved.connect(lambda *args: saved.append(args))
+    editor.failed.connect(errors.append)
+    try:
+        assert editor.count() == 3
+        hold_range(editor, 0, 1)
+        assert len(editor.selectedItems()) == 2
+        editor.context_menu(editor.visualItemRect(editor.item(1)).center())
+        menu = editor.findChildren(QMenu)[-1]
+        menu.actions()[1].trigger()
+        menu.close()
+        after = load_project(tmp_path)
+        assert len(saved) == 1 and not errors
+        assert len(after.overrides) == 2 and all(o.action == 'DROP' for o in after.overrides)
+        assert {o.source_id for o in after.overrides} == {'0', '1'}
+        before_bytes = (tmp_path/'project.json').read_bytes()
+        editor.apply_choices([editor.item(i) for i in range(3)], 'drop')
+        assert errors and len(saved) == 1
+        assert (tmp_path/'project.json').read_bytes() == before_bytes
+    finally:
+        editor.close()
+        app.processEvents()

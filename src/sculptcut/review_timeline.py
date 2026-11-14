@@ -13,8 +13,39 @@ from PySide6.QtGui import (
 )
 
 from sculptcut.i18n import tr
+from sculptcut.planning import RenderDecision
 from sculptcut.simple_timeline import EditMarker, SimpleTimeline
+from sculptcut.time_format import format_time
 from sculptcut.timeline_appearance import LanePiece, lane_bounds, paint_lane
+
+
+def video_piece(row: int, start_ms: float, decision: RenderDecision, fps: int,
+                source_name: str) -> LanePiece:
+    duration = decision.output_frame_count/fps
+    source_range = (f'{format_time(decision.source_start_us/1e6, 1)}–'
+                    f'{format_time(decision.source_end_us/1e6, 1)}')
+    if decision.action == 'HOLD':
+        mode = tr('Стоп-кадр')
+        source_detail = tr('Кадр исходника: {0}').format(
+            format_time(decision.source_start_us/1e6, 1))
+    elif decision.action == 'MONTAGE':
+        mode = tr('Кадры')
+        source_detail = tr('Серия кадров: {0}').format(len(decision.sample_times_us))
+        source_detail += '\n'+tr('В исходнике: {0}').format(source_range)
+    else:
+        speed = (decision.source_end_us-decision.source_start_us)/1e6/duration
+        value = f'{speed:.1f}'.rstrip('0').rstrip('.')
+        mode = ('≈×' if decision.speed_ramp else '×')+value
+        source_detail = tr('В исходнике: {0}').format(source_range)
+    caption = tr('Стоп') if decision.action == 'HOLD' else mode
+    short = f'{row+1} · {caption}'
+    detail = tr('В ролике: {0}–{1} · {2} с').format(
+        format_time(start_ms/1000, 1), format_time(start_ms/1000+duration, 1),
+        f'{duration:.1f}')
+    tooltip = '\n'.join((tr('Эпизод {0}').format(row+1), source_name, source_detail,
+                         detail, mode))
+    return LanePiece(row, start_ms, start_ms+duration*1000,
+                     short, detail, short, detail, str(row+1), tooltip)
 
 
 class ReviewTimeline(SimpleTimeline):
@@ -42,8 +73,9 @@ class ReviewTimeline(SimpleTimeline):
         p = QPainter(self)
         paint_lane(p, self, pieces, self.selected_row)
         top, bottom = lane_bounds(self)
-        for value in (self.movie_start, self.movie_end or self.maximum()):
-            p.fillRect(round(self.x_at(value))-4, 1, 8, 18, QColor('#8ed5ca'))
+        if not self.compact_lane:
+            for value in (self.movie_start, self.movie_end or self.maximum()):
+                p.fillRect(round(self.x_at(value))-4, 1, 8, 18, QColor('#8ed5ca'))
         for row, start, end in self.blocks:
             if row == self.selected_row and self.x_at(end)-self.x_at(start) >= 24:
                 for value in (start, end):
@@ -67,7 +99,8 @@ class ReviewTimeline(SimpleTimeline):
         return []
 
     def handle_at(self, x: float, y: float) -> tuple[int, str] | None:
-        if not ((22 <= y <= 28 or 44 <= y <= self.height()-10) if self.compact_lane else (
+        top, bottom = lane_bounds(self)
+        if not ((top-4 <= y <= top+6 or bottom-8 <= y <= bottom) if self.compact_lane else (
                 18 <= y <= 27 or 47 <= y <= 72)):
             return None
         candidates = []
@@ -100,14 +133,29 @@ class ReviewTimeline(SimpleTimeline):
             self.update()
             return
         super().mousePressEvent(event)
+        if self.compact_lane and self.pending_edge.startswith('movie'):
+            self.pending_edge = ''
+            self.movie_start = self.movie_end = 0
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self.compact_lane and not self.pointer_down and event.position().y() < 8:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            self.setToolTip(self.navigation_tip)
+            return
         if not self.pointer_down and self.pan_x is None and self.handle_at(
                 event.position().x(), event.position().y()):
             self.setCursor(Qt.CursorShape.SizeHorCursor)
             self.setToolTip(tr('Потяните край и отпустите, чтобы подрезать. Esc — отмена.'))
             return
         super().mouseMoveEvent(event)
+        top, bottom = lane_bounds(self)
+        x, y = event.position().x(), event.position().y()
+        if (not self.pointer_down and self.pan_x is None and top <= y <= bottom
+                and self.left_padding <= x <= self.width()-10 and not self.edit_at(x, y)):
+            ms = self.time_at(x)
+            piece = next((c for c in self.pieces if c.start_ms <= ms < c.end_ms), None)
+            if piece is not None and piece.tooltip:
+                self.setToolTip(piece.tooltip)
 
     def cancel_gesture(self) -> None:
         if self.pointer_down or self.pan_x is not None:

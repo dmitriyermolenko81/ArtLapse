@@ -2,8 +2,8 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
 
 from sculptcut.simple_timeline import SimpleTimeline
 from sculptcut.time_format import format_time
@@ -18,11 +18,13 @@ class LanePiece:
     detail: str
     short_title: str = ''
     short_detail: str = ''
+    tiny_title: str = ''
+    tooltip: str = ''
 
 
 def lane_bounds(track: SimpleTimeline) -> tuple[int, int]:
     if track.compact_lane:
-        return (22, track.height()-10) if track.show_ruler else (3, track.height()-3)
+        return (12, track.height()-10) if track.show_ruler else (3, track.height()-3)
     return 28, 92
 
 
@@ -34,7 +36,27 @@ def paint_lane(p: QPainter, track: SimpleTimeline, pieces: list[LanePiece],
     p.fillRect(track.rect(), QColor('#111923'))
     top, bottom = lane_bounds(track)
     height = bottom-top
-    if track.lane_label:
+    if track.lane_icon:
+        p.save()
+        p.translate(6, top+(height-18)/2)
+        p.setPen(QPen(QColor('#b4c3d4'), 1.5))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        if track.lane_icon == 'video':
+            p.drawRoundedRect(QRectF(0, 1, 18, 16), 2, 2)
+            for y in (5, 10, 14):
+                p.drawLine(QPointF(0, y), QPointF(4, y))
+                p.drawLine(QPointF(14, y), QPointF(18, y))
+            p.drawLine(QPointF(4, 1), QPointF(4, 17))
+            p.drawLine(QPointF(14, 1), QPointF(14, 17))
+        else:
+            p.drawLine(QPointF(7, 14), QPointF(7, 3))
+            p.drawLine(QPointF(16, 12), QPointF(16, 1))
+            p.drawLine(QPointF(7, 3), QPointF(16, 1))
+            p.setBrush(QColor('#b4c3d4'))
+            p.drawEllipse(QRectF(1, 12, 6, 4))
+            p.drawEllipse(QRectF(10, 10, 6, 4))
+        p.restore()
+    elif track.lane_label:
         p.setPen(QColor('#b4c3d4'))
         p.drawText(QRectF(3, top, track.left_padding-8, height),
                    Qt.AlignmentFlag.AlignVCenter, track.lane_label)
@@ -49,7 +71,8 @@ def paint_lane(p: QPainter, track: SimpleTimeline, pieces: list[LanePiece],
         label = format_time(ms/1000, 1 if track.view_span < 30000 else 0)
         label_width = p.fontMetrics().horizontalAdvance(label)
         p.drawText(max(track.left_padding+3 if track.compact_lane else 20,
-            min(track.width()-label_width-18, x-label_width//2)), 17, label)
+            min(track.width()-label_width-18, x-label_width//2)),
+            10 if track.compact_lane else 17, label)
     if not pieces and empty_label:
         p.setPen(QColor('#74879c'))
         p.setBrush(QColor('#1b2632'))
@@ -85,6 +108,12 @@ def paint_lane(p: QPainter, track: SimpleTimeline, pieces: list[LanePiece],
             text_width = max(0, min(track.width()-16, a+width-16)-text_x)
             title = clip.short_title if width < 120 and clip.short_title else clip.title
             detail = clip.short_detail if width < 120 and clip.short_detail else clip.detail
+            if track.compact_lane and clip.tiny_title:
+                title = clip.title
+                if p.fontMetrics().horizontalAdvance(title) > text_width:
+                    title = clip.short_title
+                if p.fontMetrics().horizontalAdvance(title) > text_width:
+                    title = clip.tiny_title
             lines = ((title, top+(height+p.fontMetrics().ascent())//2-2, 'white'),) if (
                 track.compact_lane) else ((title, 51, 'white'), (detail, 71, '#b4d1d1'))
             for text, y, color in lines:
