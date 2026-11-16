@@ -565,6 +565,18 @@ class MainWindow(QMainWindow):
                 self.recent_settings.setValue(key, legacy_settings.value(key))
             self.recent_settings.sync()
         selected_language = str(self.recent_settings.value("interface_language", "ru"))
+        from sculptcut.project_library import merge_projects, previous_settings
+        from sculptcut.runtime_paths import environment_value
+
+        isolated = environment_value('DATA_DIR')
+        self.project_library = (QSettings(str(Path(isolated)/'projects.ini'), INI_FORMAT)
+                                if isolated else QSettings('ArtLapse','ProjectLibrary'))
+        merge_projects(self.project_library,self.recent_settings)
+        if not isolated:
+            for namespace in ('ArtLapse','SculptCut'):
+                merge_projects(self.project_library,QSettings(namespace,namespace))
+            for previous in previous_settings():
+                merge_projects(self.project_library,QSettings(str(previous),INI_FORMAT))
         install_language(selected_language if selected_language in ("ru", "en") else "ru")
         self.setLocale(QLocale("ru_RU" if selected_language != "en" else "en_US"))
         self._recover_after_crash = self.recent_settings.value(
@@ -2235,7 +2247,8 @@ class MainWindow(QMainWindow):
         self.begin_job(tr("Создание проекта…"), detailed_feedback=False)
 
     def recent_project_paths(self) -> list[Path]:
-        saved = self.recent_settings.value("recent_projects", [])
+        self.project_library.sync()
+        saved = self.project_library.value("recent_projects", [])
         values = [saved] if isinstance(saved, str) else saved if isinstance(saved, list) else []
         return [Path(value) for value in values if isinstance(value, str) and value]
 
@@ -2249,7 +2262,10 @@ class MainWindow(QMainWindow):
             for path in self.recent_project_paths()
             if str(path).casefold() != str(current).casefold()
         )
-        self.recent_settings.setValue("recent_projects", [str(path) for path in paths[:10]])
+        self.project_library.sync()
+        self.project_library.setValue("recent_projects", [str(path) for path in paths])
+        self.project_library.sync()
+        self.recent_settings.setValue("recent_projects", [str(path) for path in paths])
         self.recent_settings.sync()
 
     def show_recent_projects(self) -> None:
@@ -2663,6 +2679,8 @@ class MainWindow(QMainWindow):
                 paths = [str(path) for path in self.recent_project_paths()
                          if path.absolute() != root]
                 self.recent_settings.setValue("recent_projects", paths)
+                self.project_library.setValue("recent_projects", paths)
+                self.project_library.sync()
                 self.folder.clear()
                 self.root = None
                 self.set_sources([])
@@ -3514,12 +3532,19 @@ class MainWindow(QMainWindow):
                 return
             if dialog.session.fixed_duration and dialog.session.changed:
                 dialog.session.fit_duration()
-            if not self.save_trim_draft(force=True):
-                return
-            edit = dialog.session.export_edit()
             video_changed = dialog.session.changed
             music_clips = (list(dialog.music_track.clips) if dialog.music_track is not None
                            and dialog.music_track.independent else None)
+            # A soundtrack-only edit must not depend on saving/recovering video edits.
+            if video_changed or music_clips is None:
+                if not self.save_trim_draft(force=True):
+                    return
+            try:
+                edit = dialog.session.export_edit()
+            except (OSError, ValueError, RuntimeError, TypeError, KeyError) as exc:
+                logging.getLogger("artlapse").exception("Could not prepare timeline edits")
+                self.show_error(str(exc))
+                return
             expected = dialog.root_overrides
             expected_splits = dialog.root_splits
             dialog.sequence.stop()
@@ -3529,7 +3554,8 @@ class MainWindow(QMainWindow):
                 from sculptcut.selection_draft import draft_path
 
                 try:
-                    draft_path(root, video).unlink(missing_ok=True)
+                    if video_changed:
+                        draft_path(root, video).unlink(missing_ok=True)
                 except OSError:
                     logging.getLogger("artlapse").warning(
                         "Applied edit draft could not be removed", exc_info=True)
@@ -3543,7 +3569,8 @@ class MainWindow(QMainWindow):
             def operation(cancel: Event, progress: Callable[[float], None],
                           stage: Callable[[str], None]) -> str:
                 current = load_project(root)
-                if current.overrides != expected or current.source_splits != expected_splits:
+                if video_changed and (current.overrides != expected
+                                       or current.source_splits != expected_splits):
                     raise ValueError(tr("Проект изменился. Откройте редактор отбора заново."))
                 stage(tr("Обновляем предпросмотр с ручным отбором"))
                 destination = next_output_path(
@@ -3551,6 +3578,8 @@ class MainWindow(QMainWindow):
                 result = render_tracks(root,edit,destination,cancel,progress,
                     encoder_status=self.encoder_ready.emit, clips=music_clips,
                     video_changed=video_changed)
+                if not video_changed:
+                    return str(result)
                 # Keep current form/settings; only persist reviewed source-time rules.
                 current = load_project(root)
                 if current.overrides != expected or current.source_splits != expected_splits:

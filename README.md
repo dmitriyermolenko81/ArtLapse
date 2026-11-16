@@ -1,8 +1,10 @@
 # ArtLapse
 
+Music replacement and project-list persistence fixes. [Details](docs/releases/0.1.6.md).
+
 **English** | [Русский](README.ru.md)
 
-**[Download ArtLapse 0.1.5 for Windows x64](https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.5/ArtLapse-0.1.5-Windows-x64.zip)** · [Release notes](https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.5)
+**[Download ArtLapse 0.1.6 for Windows x64](https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.6/ArtLapse-0.1.6-Windows-x64.zip)** · [Release notes](https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.6)
 
 Extract the entire ZIP and run **ArtLapse.exe**. Python, Qt and FFmpeg are included.
 
@@ -12,17 +14,17 @@ Turn recordings of your creative process into timelapses and Shorts, then refine
 the result with video and music editing. ArtLapse runs locally and supports English
 and Russian. The primary platform is Windows x64.
 
-![ArtLapse 0.1.5: video preview and independent video/music timelines](docs/images/en/workspace.png)
+![ArtLapse 0.1.6: video preview and independent video/music timelines](docs/images/en/workspace.png)
 
 Actual application screenshot with a ZBrush sculpting recording. The preview stays
 above two compact timelines; editing remains in the main window.
 
-## New in 0.1.5
+## New in 0.1.6
 
-Whole-model canvas preservation, stable ordinary Photoshop framing, painting-stage and duration fixes. [Release details](docs/releases/0.1.5.md).
+Whole-model canvas preservation, stable ordinary Photoshop framing, painting-stage and duration fixes. [Release details](docs/releases/0.1.6.md).
 
 
-Hold to select multiple items, batch deletion, compact track and episode labels, both analysis and final episode counts, and export stability fixes. [All changes](docs/releases/0.1.5.md).
+Hold to select multiple items, batch deletion, compact track and episode labels, both analysis and final episode counts, and export stability fixes. [All changes](docs/releases/0.1.6.md).
 
 
 

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from time import monotonic
@@ -34,6 +35,10 @@ def main() -> int:
     parser.add_argument('--smoke-tracks', action='store_true')
     parser.add_argument('--smoke-hover', action='store_true')
     args = parser.parse_args()
+    from sculptcut.runtime_paths import environment_value
+
+    if not environment_value('DATA_DIR'):
+        os.environ['ARTLAPSE_DATA_DIR'] = str(args.smoke_directory/'app-data')
     configure_logging().info("Desktop smoke started", extra={"event": "startup"})
     args.smoke_directory.mkdir(parents=True, exist_ok=True)
     configure_application_identity()
