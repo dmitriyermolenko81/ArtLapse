@@ -27,6 +27,7 @@ class Framing:
     webcam_enabled: bool
     frame_mode: str
     shorts_layout: str
+    photoshop_keep_model: bool
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,8 @@ class WindowHistory:
         for selector in (window.frame_mode, window.shorts_layout):
             selector.about_to_activate.connect(self.begin_framing)
             selector.activated.connect(self.finish_framing)
+        window.whole_model.pressed.connect(self.begin_framing)
+        window.whole_model.clicked.connect(self.finish_framing)
         window.output_editor.record_cuts = self.record_cuts
         window.output_editor.undo_handler = self.undo
         window.output_editor.redo_handler = self.redo
@@ -169,7 +172,8 @@ class WindowHistory:
         w = self.window
         return Framing(w.crop_roi, w.crop_customized, dict(w.square_rois),
                        dict(w.webcam_rois), w.webcam_enabled.isChecked(),
-                       w.frame_mode.currentData(), w.shorts_layout.currentData())
+                       w.frame_mode.currentData(), w.shorts_layout.currentData(),
+                       w.whole_model.isChecked())
 
     def record_framing(self, before: Framing) -> None:
         self.history.record(tr("Рамка кадра"), before, self.framing(), self.apply_framing)
@@ -183,6 +187,7 @@ class WindowHistory:
         w.webcam_enabled.blockSignals(False)
         w.frame_mode.setCurrentIndex(w.frame_mode.findData(state.frame_mode))
         w.shorts_layout.setCurrentIndex(w.shorts_layout.findData(state.shorts_layout))
+        w.whole_model.setChecked(state.photoshop_keep_model)
         w.update_aspect_captions()
         w.invalidate_episodes()
 

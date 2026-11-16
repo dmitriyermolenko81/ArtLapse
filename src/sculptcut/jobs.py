@@ -14,7 +14,7 @@ def render_job(destination: Path, plan: RenderPlan, encoder: str, preview: bool)
     payload["settings"].pop("request_key", None)
     # Execution batches differ from earlier one-decision receipts.
     key = cache_key(
-        "render-job-10-sdr-color", payload, encoder, preview, str(destination.resolve())
+        "render-job-11-rgb-canvas", payload, encoder, preview, str(destination.resolve())
     )
     directory = metadata_directory(destination) / ".sculptcut-jobs" / key
     if directory.parent.is_symlink() or directory.is_symlink():
@@ -68,6 +68,7 @@ def finish_job(directory: Path) -> None:
             in {
                 "concat.txt",
                 "combined.mp4",
+                "canvas.mkv",
                 "normalized.mp4",
                 "intro.mp4",
                 "presentation.mp4",
@@ -76,7 +77,7 @@ def finish_job(directory: Path) -> None:
                 "frame-filter.txt",
                 "still.png",
             }
-            or re.fullmatch(r"chunk-\d{6}\.mp4(?:\.json)?", path.name)
+            or re.fullmatch(r"chunk-\d{6}\.(?:mp4|mkv)(?:\.json)?", path.name)
         ):
             path.unlink()
     if not any(directory.iterdir()):

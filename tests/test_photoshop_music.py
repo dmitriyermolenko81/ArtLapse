@@ -135,7 +135,14 @@ def test_drawing_music_real_video_audio_preview_and_remusic(tmp_path: Path, layo
     assert all(d.action == "SPEED" for d in shots)
     assert all(d.source_end_us <= 4_000_000 or d.source_start_us >= 5_000_000 for d in shots)
     assert all(d.subject_camera is not None for d in shots)
-    assert all(len(d.subject_camera.points) == 1 for d in shots if d.subject_camera is not None)
+    if layout == 'square':
+        assert all(len(d.subject_camera.points) == 1 for d in shots if d.subject_camera is not None)
+    else:
+        # The drawing is stationary: reference compensation must not introduce zoom pulses.
+        sizes = [p.height or d.subject_camera.height for d in shots
+                 if d.subject_camera is not None for p in d.subject_camera.points]
+        assert max(sizes)/min(sizes) < 1.03
+        assert plan.settings['photoshop_camera'] == 'fixed-reference-352'
     assert plan.settings["beat_sync_aligned_cuts"] == len(shots) - 1
     assert plan.actual_frame_count == 180
     # No ZBrush feature extraction or its full proxy cache is needed.

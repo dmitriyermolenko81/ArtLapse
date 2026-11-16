@@ -416,10 +416,9 @@ def test_drawing_tracking_keeps_moving_subject_complete(tmp_path: Path) -> None:
     plan = plan_project(root, project, 60)
     camera = plan.decisions[0].subject_camera
     assert camera is not None and camera.fit_subject
-    assert len(camera.points) == 1
-    # A fixed camera must contain the entire source pan rather than chase it.
-    assert camera.points[0].x - camera.width / 2 <= 60 / 640
-    assert camera.points[0].x + camera.width / 2 >= (60 + 180 * 29 / 15 + 100) / 640
+    assert len(camera.points) > 1
+    # Counteract the source pan, keeping the drawing centred on screen.
+    assert camera.points[-1].x > camera.points[0].x + 0.3
     assert len({round(p.width or camera.width, 6) for p in camera.points}) == 1
     assert camera.points[0].y == 0.5
     blank = np.full((360, 640, 3), 255, np.uint8)
@@ -442,6 +441,7 @@ def test_drawing_tracking_keeps_moving_subject_complete(tmp_path: Path) -> None:
                 break
             ys, xs = np.where((frame[:, :, 2] > 180) & (frame[:, :, 0] < 80))
             assert len(xs) > 1000
+            assert abs((xs.min()+xs.max())/2/frame.shape[1]-0.5) < 0.02
             assert xs.min() > 20 and xs.max() < 1060 and ys.min() > 20 and ys.max() < 1900
             checked += 1
     finally:
@@ -649,7 +649,7 @@ def test_photoshop_camera_preserves_source_zoom_without_adding_camera_motion(
     plan = plan_project(root, project, 60)
     assert len(plan.decisions) == 1
     camera = plan.decisions[0].subject_camera
-    assert camera is not None and len(camera.points) == 1
+    assert camera is not None and len(camera.points) > 1
     output = render(root, project, plan, tmp_path / "zoom-stable.mp4", encoder="libx264")
     verify_output(output, 30, 15)
     original, rendered = cv2.VideoCapture(str(video)), cv2.VideoCapture(str(output))
@@ -669,5 +669,5 @@ def test_photoshop_camera_preserves_source_zoom_without_adding_camera_motion(
     finally:
         original.release()
         rendered.release()
-    # Source zoom remains visible; the application applies one constant camera.
-    assert heights[-1] - heights[0] > 0.1
+    # Compensate the source zoom instead of adding visible camera motion.
+    assert max(heights) - min(heights) < 0.04

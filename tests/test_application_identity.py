@@ -74,3 +74,40 @@ def test_real_windows_identity_and_native_window_icons() -> None:
         dialog.close()
         window.close()
         app.processEvents()
+
+
+def test_bundled_multimedia_decodes_video(tmp_path):
+    import time
+
+    import cv2
+    import numpy as np
+    from PySide6.QtCore import QUrl
+    from PySide6.QtMultimedia import QMediaPlayer, QVideoSink
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+
+    from sculptcut.application_identity import configure_multimedia_paths
+
+    path = tmp_path / "player.mp4"
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter.fourcc(*"mp4v"), 10, (64, 64))
+    assert writer.isOpened()
+    for _ in range(10):
+        writer.write(np.full((64, 64, 3), 120, np.uint8))
+    writer.release()
+    app = QApplication.instance() or QApplication([])
+    configure_multimedia_paths()
+    player, sink = QMediaPlayer(), QVideoSink()
+    frames = []
+    sink.videoFrameChanged.connect(lambda f: frames.append(f.isValid()))
+    player.setVideoSink(sink)
+    player.setSource(QUrl.fromLocalFile(str(path)))
+    player.play()
+    try:
+        deadline = time.monotonic()+5
+        while not any(frames) and time.monotonic() < deadline:
+            app.processEvents()
+            QTest.qWait(20)
+        assert player.isAvailable() and any(frames), player.errorString()
+    finally:
+        player.stop()
+        player.setSource(QUrl())

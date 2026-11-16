@@ -2,13 +2,24 @@
 
 import ctypes
 import logging
+import os
 import sys
+from pathlib import Path
 
+import PySide6
 from PySide6.QtCore import QCoreApplication
 
 from sculptcut import __version__
 
 APP_USER_MODEL_ID = "ArtLapse.Desktop"
+_MULTIMEDIA_DLL_DIRECTORIES: list[object] = []
+
+
+def configure_multimedia_paths() -> None:
+    """Keep the bundled codec directory available for Qt's late plugin loading."""
+    if sys.platform == "win32" and not _MULTIMEDIA_DLL_DIRECTORIES:
+        directory = Path(PySide6.__file__).resolve().parent
+        _MULTIMEDIA_DLL_DIRECTORIES.append(os.add_dll_directory(str(directory)))
 
 
 def configure_application_identity() -> None:

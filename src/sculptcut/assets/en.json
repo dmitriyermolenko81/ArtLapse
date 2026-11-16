@@ -1003,7 +1003,7 @@
   "Эпизод {0}": "Episode {0}",
   "Кадры": "Frames",
   "Стоп": "Still",
-  "Монтаж · Исходники: {0} · Вырезано: {1} ({2}%) · Оставлено: {3} · Ролик: {4} · После анализа: {5} · В ролике: {6}": "Edit \u00b7 Sources: {0} \u00b7 Removed: {1} ({2}%) \u00b7 Retained: {3} \u00b7 Output: {4} \u00b7 After analysis: {5} \u00b7 In video: {6}",
+  "Монтаж · Исходники: {0} · Вырезано: {1} ({2}%) · Оставлено: {3} · Ролик: {4} · После анализа: {5} · В ролике: {6}": "Edit · Sources: {0} · Removed: {1} ({2}%) · Retained: {3} · Output: {4} · After analysis: {5} · In video: {6}",
   "Удерживайте ЛКМ и ведите по списку для выбора нескольких.": "Hold the left mouse button and drag through the list to select multiple items.",
   "Выбрано: {0}": "Selected: {0}",
   "Удалить выбранные версии ({0})": "Delete selected versions ({0})",
@@ -1011,5 +1011,8 @@
   "Выбранные MP4 и их история будут удалены с диска. Исходники и невыбранные версии останутся.": "The selected MP4 files and their history will be deleted from disk. Sources and unselected versions will remain.",
   "Удалено версий: {0}": "Versions deleted: {0}",
   "Ещё: {0}": "More: {0}",
-  "Удалить выбранные шаблоны?": "Delete selected templates?"
+  "Удалить выбранные шаблоны?": "Delete selected templates?",
+  "Сохранять целую модель": "Keep the whole model",
+  "Сохранять уже показанные части рисунка и обновлять видимую область. При потере совмещения холст сбрасывается.": "Keep previously shown parts of the drawing and update the visible area. Reset the canvas when alignment is lost.",
+  "Сохранять уже показанные части рисунка и обновлять видимую область. При потере совмещения сохраняется последний надёжный вид.": "Keep previously shown parts of the drawing and update the visible area. Keep the last reliably aligned view when matching is lost."
 }

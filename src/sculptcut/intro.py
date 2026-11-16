@@ -10,7 +10,7 @@ from sculptcut.media import discover, run_process
 from sculptcut.presentation import presentation_frames, presentation_signature
 from sculptcut.project import fingerprint
 from sculptcut.shorts_layout import SQUARE_BACKGROUND, uses_square
-from sculptcut.video_color import SDR_ENCODER_ARGS, SDR_FILTER
+from sculptcut.video_color import CANVAS_DELIVERY_CRF, SDR_ENCODER_ARGS, SDR_FILTER
 
 
 def active_intro_image(settings: ProjectSettings) -> Path | None:
@@ -104,10 +104,13 @@ def prepend_intro(
     if settings.intro_position == "end":
         offset = (body_frames - overlap) / fps
         inputs = "[body][intro]"
+    from sculptcut.canvas_history import enabled as canvas_history_enabled
+
+    crf = str(CANVAS_DELIVERY_CRF if canvas_history_enabled(settings) else 18)
     quality = (
-        ["-preset", "p4", "-rc", "vbr", "-cq", "18", "-b:v", "0"]
+        ["-preset", "p4", "-rc", "vbr", "-cq", crf, "-b:v", "0"]
         if encoder == "h264_nvenc"
-        else ["-preset", "fast", "-crf", "18"]
+        else ["-preset", "fast", "-crf", crf]
     )
     with tempfile.TemporaryDirectory(prefix="intro-", dir=output.parent) as scratch:
         script = Path(scratch) / "filter.txt"

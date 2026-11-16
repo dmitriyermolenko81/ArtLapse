@@ -12,6 +12,9 @@ def _episode_count(plan: RenderPlan) -> int:
 
 
 def analyzed_episode_count(plan: RenderPlan) -> int | None:
+    retained = plan.settings.get('short_candidates_retained')
+    if isinstance(retained, int) and not isinstance(retained, bool) and retained >= 0:
+        return retained
     key = ('short_candidates_verified' if plan.settings.get('preset') in SHORTS_PRESETS
            else 'work_verified_count')
     value = plan.settings.get(key)

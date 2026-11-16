@@ -24,6 +24,7 @@ MINIMUM_SOURCE_US = 60_000_000
 def complete_short_catalogue(
     root: Path, project: Project, base: RenderPlan, segments: list[Segment],
     cancel: Event | None = None, stage: Callable[[str], None] | None = None,
+    *, _prefer_verified: bool = True,
 ) -> RenderPlan:
     # Very short inputs retain the native small-source fallback. The full
     # source audit is intended for condensed recordings, as in timelapse265.
@@ -34,7 +35,24 @@ def complete_short_catalogue(
     with EpisodeInspector(root, project, cancel, work_only=True, drawing_mode=drawing) as inspector:
         pool = work_catalogue(root, project, base, segments, inspector.development,
                               cancel, stage, use_features=not drawing)
-    usable = [e for e in pool if e.process_verified]
+    # A failed comparison is not evidence of inactivity. In the ordinary
+    # drawing montage retain those source intervals for conservative sampling;
+    # still/music modes keep their existing positive-evidence selection.
+    usable = [e for e in pool if e.process_verified or (
+        project.settings.preset == "photoshop_shorts"
+        and e.process_note == "incomparable_or_occluded")]
+    preferred = False
+    if project.settings.preset == "photoshop_shorts" and _prefer_verified:
+        positive = [e for e in usable if e.process_verified]
+        capacity = sum(math.floor(max(0, min(d.source_end_us, e.work_end_us or e.end_us)
+            - max(d.source_start_us, e.work_start_us or e.start_us))*base.output_fps/1e6)
+            for e in positive for d in base.decisions
+            if d.source_id == e.source_id and d.action != "DROP")
+        if capacity >= base.target_frame_count:
+            # Unknown windows are a reserve, not a reason to displace confirmed
+            # intermediate paint states with a much coarser chronological summary.
+            usable, preferred = positive, True
+    verified = sum(bool(e.process_verified) for e in usable)
     def save_catalogue() -> None:
         atomic_write(root / f"{project.settings.preset}-work-episodes.json", json.dumps({
             "version": VERSION, "candidates": [e.model_dump() | {"id": e.id} for e in pool],
@@ -43,7 +61,9 @@ def complete_short_catalogue(
     save_catalogue()
     settings = base.settings | {"complete_short_catalogue": VERSION,
         "short_catalogue_preset": project.settings.preset,
-        "short_candidates_checked": len(pool), "short_candidates_verified": len(usable)}
+        "short_candidates_checked": len(pool), "short_candidates_verified": verified,
+        "short_candidates_retained": len(usable),
+        "short_unknown_policy": "prefer-verified-363" if preferred else "retain-drawing-360"}
     if not usable:
         # Unknown evidence remains unknown. Native modes still have a clean
         # final-view/static-input fallback; never claim these are verified edits.
@@ -55,8 +75,8 @@ def complete_short_catalogue(
                    and (e.work_end_us or e.end_us) > d.source_start_us]
         bounds = {d.source_start_us, d.source_end_us}
         for e in windows:
-            bounds.update(t for t in (e.work_start_us, e.work_end_us)
-                          if t is not None and d.source_start_us < t < d.source_end_us)
+            bounds.update(t for t in (e.work_start_us or e.start_us, e.work_end_us or e.end_us)
+                          if d.source_start_us < t < d.source_end_us)
         times = sorted(bounds)
         for a, b in zip(times, times[1:], strict=False):
             event = next((e for e in windows if (e.work_start_us or e.start_us) <= a
@@ -84,6 +104,12 @@ def complete_short_catalogue(
     rejected = {e.id for e in usable if any(r.source_id == e.source_id
         and r.start_us < (e.work_end_us or e.end_us)
         and r.end_us > (e.work_start_us or e.start_us) for r in ranges)}
+    remaining = sum(math.floor((d.source_end_us-d.source_start_us)*base.output_fps/1e6)
+                    for d in result.decisions if d.output_frame_count
+                    and d.episode_id not in rejected)
+    if preferred and remaining < base.target_frame_count:
+        return complete_short_catalogue(root, project, base, segments, cancel, stage,
+                                        _prefer_verified=False)
     if rejected:
         full = [IdleRange(source_id=e.source_id, start_us=e.work_start_us or e.start_us,
                           end_us=e.work_end_us or e.end_us, reason="shorts:screen_overlay")
@@ -93,7 +119,14 @@ def complete_short_catalogue(
                 "process_note": "screen_overlay"}) if e.id in rejected else e for e in pool]
         save_catalogue()
         result = result.model_copy(update={"settings": result.settings | {
-            "short_candidates_verified": len(usable)-len(rejected)}})
+            "short_candidates_verified": sum(bool(e.process_verified)
+                for e in usable if e.id not in rejected),
+            "short_candidates_retained": len(usable)-len(rejected)}})
+    if preferred and result.actual_frame_count < base.target_frame_count:
+        # Overlay rejection may make the positive pool too short. Reuse cached
+        # inspections and admit the uncertain reserve, preserving the duration.
+        return complete_short_catalogue(root, project, base, segments, cancel, stage,
+                                        _prefer_verified=False)
     return result
 
 

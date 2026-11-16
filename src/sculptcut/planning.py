@@ -11,6 +11,8 @@ from pydantic import Field
 
 from sculptcut.analysis import analysis_key
 from sculptcut.budget import distribute
+from sculptcut.canvas_history import VERSION as CANVAS_VERSION
+from sculptcut.canvas_history import enabled as canvas_history_enabled
 from sculptcut.development import development_key
 from sculptcut.domain import Model, Project, Roi, SourceMedia, SpeedRamp, SubjectCamera
 from sculptcut.idle import IdleRange, project_idle
@@ -139,6 +141,8 @@ def build_plan(project: Project, idle: list[IdleRange], target_seconds: float) -
         settings={
             "mode": "full_ui",
             "preset": project.settings.preset,
+            "photoshop_keep_model": int(canvas_history_enabled(project.settings)),
+            "canvas_history_version": CANVAS_VERSION,
             "target_seconds": target_seconds,
             "audio": "music"
             if project.settings.music_path or project.settings.music_folder
@@ -171,6 +175,10 @@ def simple_speed_plan(project: Project, target_seconds: float) -> RenderPlan:
 
 
 def validate_plan(project: Project, plan: RenderPlan) -> None:
+    if bool(plan.settings.get("photoshop_keep_model", 0)) != canvas_history_enabled(
+        project.settings
+    ):
+        raise ValueError("Canvas memory changed; rebuild the edit plan")
     if plan.settings.get("preset", "timelapse") != project.settings.preset:
         raise ValueError("Preset changed; rebuild the plan")
     music_hash = music_signature(project.settings)
@@ -359,6 +367,17 @@ def plan_project(
         }
         project_identity["visual_transitions"] = {"version": 249, **asdict(TRANSITIONS)}
     project_identity["shared_episode_edits"] = "shared-source-edits-141"
+    if project.settings.preset in ('photoshop_shorts', 'photoshop_music_shorts'):
+        from dataclasses import asdict
+
+        from sculptcut.canvas_edges import SETTINGS as EDGES
+        from sculptcut.drawing_page import SETTINGS as PAGE
+        from sculptcut.drawing_reference import SETTINGS as REFERENCE
+        from sculptcut.photoshop import SETTINGS as DRAWING
+
+        project_identity['photoshop_camera'] = {
+            'version': 366, **asdict(DRAWING), 'reference': asdict(REFERENCE),
+            'canvas_edges': asdict(EDGES), 'page': asdict(PAGE)}
     if project.settings.preset in ("shorts", "music_shorts") and not uses_square(project.settings):
         from dataclasses import asdict
 
@@ -425,7 +444,7 @@ def plan_project(
         if project.settings.preset == "photoshop_beat_shorts"
         else "plan-67-canvas-edge-shorts"
         if project.settings.preset == "shorts"
-        else "plan-100-photoshop-fixed-camera"
+        else "plan-102-photoshop-verified-story"
         if project.settings.preset == "photoshop_shorts"
         else "plan-116-global-process-budget"
         if project.settings.preset == "timelapse"

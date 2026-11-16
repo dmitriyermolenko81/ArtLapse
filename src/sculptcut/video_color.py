@@ -11,3 +11,15 @@ SDR_ENCODER_ARGS = (
     "-color_range", "tv", "-colorspace", "bt709",
     "-color_primaries", "bt709", "-color_trc", "bt709",
 )
+
+# Canvas frames are decoded by OpenCV, whose YUV decoder can ignore matrix tags.
+# Keep this entire working path RGB and lossless; subsample only for delivery.
+SDR_RGB_FILTER = (
+    "scale=iw:ih:out_range=pc,format=bgr0,"
+    "setparams=range=full:colorspace=gbr:color_primaries=bt709:color_trc=bt709"
+)
+RGB_ENCODER_ARGS = (
+    "-color_range", "pc", "-colorspace", "rgb",
+    "-color_primaries", "bt709", "-color_trc", "bt709",
+)
+CANVAS_DELIVERY_CRF = 14

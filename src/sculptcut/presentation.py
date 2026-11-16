@@ -8,7 +8,7 @@ from sculptcut.domain import ProjectSettings
 from sculptcut.media import discover, probe, run_process
 from sculptcut.project import fingerprint
 from sculptcut.shorts_layout import SHORTS_PRESETS, SQUARE_BACKGROUND, uses_square
-from sculptcut.video_color import SDR_ENCODER_ARGS, SDR_FILTER
+from sculptcut.video_color import CANVAS_DELIVERY_CRF, SDR_ENCODER_ARGS, SDR_FILTER
 
 
 def presentation_frames(settings: ProjectSettings, fps: int) -> int:
@@ -59,8 +59,11 @@ def attach_presentation(
             "force_divisible_by=2:flags=lanczos[sharp];"
             "[blur][sharp]overlay=(W-w)/2:(H-h)/2,"
         )
-    quality = (["-preset", "p4", "-rc", "vbr", "-cq", "18", "-b:v", "0"]
-               if encoder == "h264_nvenc" else ["-preset", "fast", "-crf", "18"])
+    from sculptcut.canvas_history import enabled as canvas_history_enabled
+
+    crf = str(CANVAS_DELIVERY_CRF if canvas_history_enabled(settings) else 18)
+    quality = (["-preset", "p4", "-rc", "vbr", "-cq", crf, "-b:v", "0"]
+               if encoder == "h264_nvenc" else ["-preset", "fast", "-crf", crf])
     with tempfile.TemporaryDirectory(prefix="presentation-", dir=output.parent) as folder:
         scratch = Path(folder)
         clip = scratch / "clip.mp4"

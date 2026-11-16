@@ -3,6 +3,7 @@
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from math import ceil
 from pathlib import Path
 from threading import Event
 
@@ -10,11 +11,16 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from sculptcut.canvas_edges import trim_horizontal_chrome
 from sculptcut.domain import CameraPoint, Project, Roi, SubjectCamera
+from sculptcut.drawing_page import SETTINGS as PAGE
+from sculptcut.drawing_page import enclosed_page, lock_page_points, page_colour, page_subject
+from sculptcut.drawing_reference import SETTINGS as REFERENCE
+from sculptcut.drawing_reference import DrawingReference, locked_reference_points
 from sculptcut.media import Cancelled, MediaError
 from sculptcut.planning import RenderPlan
 from sculptcut.shorts import viewport_shorts_camera
-from sculptcut.subject_camera import tracking_clip
+from sculptcut.subject_camera import still_frame, tracking_clip
 from sculptcut.webcam import AnalysisCapture, webcam_roi
 
 
@@ -39,6 +45,8 @@ class DrawingSettings:
     stationary_center_range: float = 0.02
     scale_lock_ratio: float = 1.2
     canvas_border_fraction: float = 0.005
+    motion_lock_center_range: float = 0.003
+    sketch_reference_weight: float = .5
 
 
 SETTINGS = DrawingSettings()
@@ -117,6 +125,7 @@ def stable_camera(
     width: int,
     height: int,
     margin: float,
+    stationary_range: float | None = None,
 ) -> SubjectCamera:
     """Bridge detection gaps and reject isolated errors without chasing the viewport."""
     full = Roi(x=0, y=0, width=1, height=1)
@@ -162,7 +171,9 @@ def stable_camera(
         smooth[i, :2] = np.clip(fitted[:2], 0, 1)
         smooth[i, 2:] = np.maximum(fitted[2:], 1e-6)
     for axis in (0, 1):
-        if float(np.ptp(smooth[:, axis])) <= SETTINGS.stationary_center_range:
+        if float(np.ptp(smooth[:, axis])) <= (
+            SETTINGS.stationary_center_range if stationary_range is None else stationary_range
+        ):
             smooth[:, axis] = np.median(smooth[:, axis])
     aspect = (9 / 16) * height / width
     camera_h = np.maximum(smooth[:, 3], smooth[:, 2] / aspect) * margin
@@ -190,6 +201,32 @@ def stable_camera(
             for i, (t, _) in enumerate(samples)
         ],
     )
+
+
+def shared_scene_scales(cameras: list[SubjectCamera]) -> list[SubjectCamera]:
+    """Share one fit across comparable episodes, without merging genuine source zooms."""
+    result = list(cameras)
+    static = sorted((i for i, c in enumerate(cameras)
+                     if all(abs((p.height or c.height)-c.height) < 1e-9
+                            for p in c.points)), key=lambda i: cameras[i].height, reverse=True)
+    start = 0
+    while start < len(static):
+        anchor = cameras[static[start]]
+        end = start + 1
+        while (end < len(static)
+               and anchor.height/cameras[static[end]].height <= SETTINGS.scale_lock_ratio):
+            end += 1
+        for i in static[start:end]:
+            result[i] = cameras[i].model_copy(update={
+                'width': anchor.width, 'height': anchor.height,
+                'points': [p.model_copy(update={'width': None, 'height': None})
+                           for p in cameras[i].points],
+            })
+            points = result[i].points
+            if all(p.x == points[0].x and p.y == points[0].y for p in points):
+                result[i] = result[i].model_copy(update={'points': points[:1]})
+        start = end
+    return result
 
 
 def locked_camera(
@@ -293,6 +330,8 @@ def drawing_and_canvas_box(
     area = sum(int(s[4]) for s in regions)
     if area < w * h * SETTINGS.minimum_canvas_fraction:
         return None, None
+    x, y, right, bottom = trim_horizontal_chrome(frame, (x, y, x+cw, y+ch))
+    cw, ch = right-x, bottom-y
     canvas = Roi(x=x / w, y=y / h, width=cw / w, height=ch / h)
     # A zoomed drawing can meet the screen edge, leaving background on one side only.
     # Its background bounding box must not exclude the drawing itself.
@@ -395,9 +434,22 @@ def reframe_photoshop(
     cancel: Event | None,
     progress: Callable[[float], None] | None = None,
 ) -> RenderPlan:
+    plan = plan.model_copy(update={'settings':{k:v for k,v in plan.settings.items()
+                                               if k != 'photoshop_frame_only'}})
     sources = {s.id: s for s in project.sources}
     decisions = []
-    warnings = list(plan.warnings)
+    warnings = [w for w in plan.warnings if not w.startswith("Photoshop:")]
+    references: dict[str, tuple[float, NDArray[np.uint8], Roi, Roi]] = {}
+    episode_references: dict[int, tuple[float, int, Roi, Roi]] = {}
+    ordinary = (project.settings.preset == 'photoshop_shorts'
+                and not project.settings.photoshop_keep_model
+                and project.settings.shorts_layout == 'auto')
+    clips: dict[int, tuple[Path, list[int], Roi]] = {}
+    measured_boxes: dict[int, list[Roi | None]] = {}
+    page_samples: dict[int, list[Roi | None]] = {}
+    canvas_samples: dict[int, list[Roi | None]] = {}
+    sketch_samples: dict[int, list[bool]] = {}
+    page_background = None
     with tempfile.TemporaryDirectory(prefix="sculptcut-drawing-") as temporary:
         for index, decision in enumerate(plan.decisions):
             if cancel and cancel.is_set():
@@ -409,16 +461,20 @@ def reframe_photoshop(
                 sources[decision.source_id],
                 decision.source_start_us,
                 decision.source_end_us,
-                Path(temporary) / "drawing.mp4",
+                Path(temporary) / f"drawing-{index}.mp4",
                 cancel,
                 decision.output_frame_count,
                 plan.output_fps,
+                rgb=True,
             )
             reader = AnalysisCapture(clip, webcam_roi(project.settings, decision.source_id))
             samples: list[tuple[int, Roi | None]] = []
             canvases: list[Roi] = []
             previous = None
             fallback = False
+            pages: list[Roi | None] = []
+            visible_canvases: list[Roi | None] = []
+            sketches: list[bool] = []
             try:
                 frame_index = 0
                 while True:
@@ -430,10 +486,40 @@ def reframe_photoshop(
                     if frame_index >= decision.output_frame_count:
                         break
                     box, canvas = drawing_and_canvas_box(frame.astype(np.uint8), previous)
+                    page = enclosed_page(frame.astype(np.uint8),rotated=ordinary)
+                    sketch = False
+                    if page is not None and (box is None or box.width*box.height >= (
+                        page.width*page.height*PAGE.maximum_subject_coverage
+                    )):
+                        sketch_box = page_subject(frame.astype(np.uint8), page)
+                        if sketch_box is not None:
+                            box, canvas, sketch = sketch_box, page, True
+                    pages.append(page)
+                    visible_canvases.append(canvas)
+                    sketches.append(sketch)
+                    if page is not None and page_background is None:
+                        page_background = page_colour(frame.astype(np.uint8), page)
                     if canvas is not None:
                         canvases.append(canvas)
                     if box is not None:
                         previous = box
+                    view = project.rois.get(decision.source_id) or canvas
+                    if box is not None and view is not None:
+                        edge = REFERENCE.reference_edge_margin
+                        edges = sum((box.x <= view.x+edge, box.y <= view.y+edge,
+                            box.x+box.width >= view.x+view.width-edge,
+                            box.y+box.height >= view.y+view.height-edge))
+                        quality = (-REFERENCE.clipped_edge_penalty*edges
+                                   + box.width*box.height/(view.width*view.height))
+                        if sketch:
+                            quality *= SETTINGS.sketch_reference_weight
+                        best = references.get(decision.source_id)
+                        if best is None or quality > best[0]:
+                            references[decision.source_id] = (quality, frame.copy(), box, view)
+                        if ordinary:
+                            local_best = episode_references.get(index)
+                            if local_best is None or quality > local_best[0]:
+                                episode_references[index] = (quality, frame_index, box, view)
                     fallback |= box is None
                     timestamp = decision.source_start_us + (
                         (decision.source_end_us - decision.source_start_us)
@@ -451,16 +537,256 @@ def reframe_photoshop(
             if source.rotation % 180 == 90:
                 width, height = height, width
             viewport = drawing_viewport(canvases, project.rois.get(decision.source_id))
-            camera = centered_camera(
+            camera = stable_camera(
                 samples, plan.output_fps, width, height,
-                project.settings.shorts_tracking_margin, viewport,
-            )
+                project.settings.shorts_tracking_margin, SETTINGS.motion_lock_center_range,
+            ).model_copy(update={'viewport': viewport})
             decisions.append(decision.model_copy(update={"subject_camera": camera}))
+            clips[index] = (clip, [t for t, _ in samples], viewport)
+            measured_boxes[index] = [box for _, box in samples]
+            page_samples[index] = pages
+            canvas_samples[index] = visible_canvases
+            sketch_samples[index] = sketches
             if fallback:
                 warnings.append(
                     "Photoshop: detection gaps bridged; full frame only if no subject found: "
                     f"{decision.source_id}"
                 )
             if progress:
-                progress((index + 1) / len(plan.decisions))
-    return plan.model_copy(update={"decisions": decisions, "warnings": warnings})
+                progress(.5*(index + 1) / len(plan.decisions))
+        # All selected episodes are fitted to the most complete view, rather than
+        # centring a leg/detail crop as if it were the whole drawing.
+        total_samples = sum(len(samples) for samples in page_samples.values())
+        valid_pages = sum(p is not None for samples in page_samples.values() for p in samples)
+        subjects = sum(box is not None and (page is None or
+            box.width*box.height < page.width*page.height*PAGE.maximum_subject_coverage)
+            for i, boxes in measured_boxes.items()
+            for box, page in zip(boxes, page_samples[i], strict=True))
+        if ordinary:
+            from sculptcut.photoshop_local import local_shots
+
+            local = local_shots(project,decisions,clips,episode_references,page_samples,
+                                canvas_samples,cancel,progress,prefer_pages=bool(total_samples
+                                    and valid_pages >= total_samples*PAGE.minimum_tracking_fraction
+                                    and subjects <= total_samples*PAGE.maximum_subject_fraction))
+            return plan.model_copy(update={'decisions':local,'settings':plan.settings | {
+                'photoshop_camera':'local-episode-366','photoshop_frame_only':1,
+                'photoshop_registered_shots':len(clips)},'warnings':warnings})
+        if (project.settings.photoshop_keep_model and not project.rois and total_samples
+                and valid_pages >= total_samples*PAGE.minimum_tracking_fraction
+                and subjects <= total_samples*PAGE.maximum_subject_fraction):
+            aspects: list[float] = []
+            for i, values in page_samples.items():
+                source = sources[decisions[i].source_id]
+                sw, sh = source.width, source.height
+                if source.rotation % 180 == 90:
+                    sw, sh = sh, sw
+                aspects.extend(page.width*sw/(page.height*sh)
+                               for page in values if page is not None)
+            reference_aspect = float(np.median(aspects))
+            for index, pages in page_samples.items():
+                source = sources[decisions[index].source_id]
+                sw, sh = source.width, source.height
+                if source.rotation % 180 == 90:
+                    sw, sh = sh, sw
+                times = clips[index][1]
+                decision = decisions[index]
+                if decision.action == 'HOLD':
+                    timestamp = decision.source_start_us
+                    if decision.provenance in ('user:final_tail', 'user:shorts_final'):
+                        timestamp = max(timestamp, decision.source_end_us-ceil(
+                            1_000_000*source.fps_den/source.fps_num))
+                    image_path = still_frame(source, timestamp,
+                        Path(temporary)/f'page-hold-{index}.png', cancel, sample_width=960)
+                    still = cv2.imread(str(image_path))
+                    page = enclosed_page(np.asarray(still, dtype=np.uint8))
+                    pages = [page]*len(times)
+                poses = []
+                views = []
+                for t, page in zip(times, pages, strict=True):
+                    if page is None:
+                        continue
+                    aspect = page.width*sw/(page.height*sh)
+                    if max(aspect/reference_aspect, reference_aspect/aspect) > (
+                        PAGE.maximum_aspect_ratio_change
+                    ):
+                        continue
+                    camera = centered_camera([(t, page)], 1, sw, sh,
+                        PAGE.framing_margin, page)
+                    poses.append(camera.points[0].model_copy(update={
+                        'width':camera.width, 'height':camera.height, 'reference_matched':True,
+                        'visible_region':page}))
+                    views.append(page)
+                if poses:
+                    # Decode the union; only each point's actual visible page is
+                    # copied to the canvas, including when the source pans/zooms.
+                    left = min(v.x for v in views)
+                    top = min(v.y for v in views)
+                    right = max(v.x+v.width for v in views)
+                    bottom = max(v.y+v.height for v in views)
+                    viewport = Roi(x=left, y=top, width=right-left, height=bottom-top)
+                    trusted = {p.time_us:p for p in poses}
+                    poses = [min(poses, key=lambda p: abs(p.time_us-t)).model_copy(update={
+                        'time_us':t, 'reference_matched':t in trusted}) for t in times]
+                    decisions[index] = decisions[index].model_copy(update={'subject_camera':
+                        camera.model_copy(update={'viewport':viewport, 'canvas_registered':True,
+                            'points':poses, 'background_rgb':page_background})})
+                else:
+                    old_camera = decisions[index].subject_camera
+                    assert old_camera is not None
+                    decisions[index] = decisions[index].model_copy(update={'subject_camera':
+                        old_camera.model_copy(update={'canvas_registered':False})})
+            for sid in sources:
+                page_cameras = {i:c for i in page_samples if decisions[i].source_id == sid
+                                and (c := decisions[i].subject_camera) is not None
+                                and c.canvas_registered}
+                page_poses = [point for c in page_cameras.values() for point in c.points]
+                locked = iter(lock_page_points(page_poses))
+                for i, page_camera in page_cameras.items():
+                    decisions[i] = decisions[i].model_copy(update={'subject_camera':
+                        page_camera.model_copy(update={'points':[
+                            next(locked) for _ in page_camera.points]})})
+            if progress:
+                progress(1.0)
+            return plan.model_copy(update={'decisions':decisions, 'settings':plan.settings | {
+                'photoshop_camera':'enclosed-page-361', 'photoshop_registered_shots':sum(
+                    bool(d.output_frame_count and d.subject_camera
+                         and d.subject_camera.canvas_registered) for d in decisions),
+                'photoshop_reference_source':'page'},
+                'warnings':[w for w in warnings if not w.startswith('Photoshop:')]})
+        registrations = {}
+        # One reference for the whole montage, not a new frame for each input file.
+        best_reference = max(references, key=lambda sid: references[sid][0], default=None)
+        for sid in ([best_reference] if best_reference is not None else []):
+            _, image, box, viewport = references[sid]
+            source = sources[sid]
+            sw, sh = source.width, source.height
+            if source.rotation % 180 == 90:
+                sw, sh = sh, sw
+            reference_camera = centered_camera([(0, box)], 1, sw, sh,
+                project.settings.shorts_tracking_margin, viewport)
+            registrations[sid] = DrawingReference(image, viewport, reference_camera)
+        reference = registrations.get(best_reference) if best_reference is not None else None
+        reference_box = references[best_reference][2] if best_reference is not None else None
+        registered: set[int] = set()
+        source_references: dict[str, list[DrawingReference]] = {}
+        for number, (index, (clip, times, viewport)) in enumerate(clips.items()):
+            registration = reference
+            anchors = source_references.get(decisions[index].source_id, [])
+            anchor_image = None
+            anchor_point = None
+            points: list[CameraPoint | None] = []
+            if registration is not None:
+                reader = AnalysisCapture(clip, webcam_roi(
+                    project.settings, decisions[index].source_id))
+                try:
+                    for t in times:
+                        if cancel and cancel.is_set():
+                            raise Cancelled('Photoshop reference fitting cancelled')
+                        ok, frame = reader.read()
+                        if not ok:
+                            raise MediaError('Cannot decode Photoshop reference clip')
+                        # Follow the last trusted view within this source first. Artwork
+                        # changes between recordings must not rematch a face to a repeated
+                        # detail of a distant reference and suddenly halve the scale.
+                        point = None
+                        score = 0.0
+                        features = registration.features(frame, viewport)
+                        for candidate in [*anchors, registration]:
+                            matched = candidate.point(frame, viewport, t, features)
+                            if matched is not None and candidate.last_score > score:
+                                point, score = matched, candidate.last_score
+                        if point is not None:
+                            anchor_image, anchor_point = frame.copy(), point
+                        # Textureless complete drawings can still provide a reliable bbox.
+                        # Never use a clipped detail/head as a replacement full-body reference.
+                        box = measured_boxes[index][len(points)]
+                        if (point is None and box is not None and reference_box is not None
+                                and (len(registration.keys) < REFERENCE.minimum_inliers
+                                     or sketch_samples[index][len(points)])):
+                            fh, fw = frame.shape[:2]
+                            aspect = box.width*fw/(box.height*fh)
+                            ref_aspect = (reference_box.width*registration.width
+                                          / (reference_box.height*registration.height))
+                            edge = REFERENCE.reference_edge_margin
+                            complete = (box.x > viewport.x+edge and box.y > viewport.y+edge
+                                and box.x+box.width < viewport.x+viewport.width-edge
+                                and box.y+box.height < viewport.y+viewport.height-edge)
+                            if complete and max(aspect/ref_aspect, ref_aspect/aspect) <= (
+                                REFERENCE.maximum_whole_subject_aspect_ratio
+                            ):
+                                tracking = decisions[index].subject_camera
+                                assert tracking is not None
+                                pose = tracking.points[min(len(points),len(tracking.points)-1)]
+                                point = pose.model_copy(update={'time_us':t,
+                                    'width':pose.width or tracking.width,
+                                    'height':pose.height or tracking.height})
+                        visible = canvas_samples[index][len(points)]
+                        if point is not None and visible is not None:
+                            left, top = max(visible.x, viewport.x), max(visible.y, viewport.y)
+                            right = min(visible.x+visible.width, viewport.x+viewport.width)
+                            bottom = min(visible.y+visible.height, viewport.y+viewport.height)
+                            if right > left and bottom > top:
+                                point = point.model_copy(update={'visible_region':Roi(
+                                    x=left, y=top, width=right-left, height=bottom-top)})
+                            else:
+                                point = None
+                        else:
+                            point = None
+                        points.append(point)
+                finally:
+                    reader.release()
+            valid = [i for i, p in enumerate(points) if p is not None]
+            if valid and len(valid) >= len(times)*REFERENCE.minimum_tracking_fraction:
+                candidate_camera = decisions[index].subject_camera
+                assert candidate_camera is not None
+                assert registration is not None
+                camera = candidate_camera.model_copy(update={
+                    'canvas_registered': True,
+                    'background_rgb': registration.camera.background_rgb,
+                    'points': [p.model_copy(update={
+                        'reference_matched': raw is not None,
+                        'visible_region':raw.visible_region if raw else None})
+                               for p, raw in zip(locked_reference_points(points, times),
+                                                 points, strict=True)]})
+                decisions[index] = decisions[index].model_copy(update={'subject_camera':camera})
+                registered.add(index)
+                if anchor_image is not None and anchor_point is not None:
+                    bank = source_references.setdefault(decisions[index].source_id, [])
+                    assert anchor_point.height is not None and anchor_point.width is not None
+                    diverse = all(
+                        max(anchor_point.height/a.camera.height,
+                            a.camera.height/anchor_point.height) > REFERENCE.anchor_scale_ratio
+                        or abs(anchor_point.x-a.camera.points[0].x)/anchor_point.width
+                            > REFERENCE.anchor_translation_fraction
+                        or abs(anchor_point.y-a.camera.points[0].y)/anchor_point.height
+                            > REFERENCE.anchor_translation_fraction for a in bank)
+                    if diverse and len(bank) < REFERENCE.source_anchors:
+                        bank.append(DrawingReference(anchor_image, viewport, camera.model_copy(
+                            update={'width':anchor_point.width, 'height':anchor_point.height,
+                                    'points':[anchor_point]})))
+            else:
+                warnings.append('Photoshop: no reliable reference match; fixed framing retained: '
+                                + decisions[index].source_id)
+            if progress:
+                progress(.5+.5*(number+1)/max(1,len(clips)))
+    for i, decision in enumerate(decisions):
+        if not decision.output_frame_count or i in registered:
+            continue
+        neighbors = [j for j in registered if decisions[j].source_id == decision.source_id]
+        if neighbors:
+            j = min(neighbors, key=lambda j: abs(
+                decisions[j].source_start_us-decision.source_start_us))
+            fallback_camera = decisions[j].subject_camera
+        else:
+            fallback_camera = reference.camera if reference is not None else decision.subject_camera
+        assert fallback_camera is not None and decision.subject_camera is not None
+        point = fallback_camera.points[0].model_copy(
+            update={'time_us':decision.source_start_us})
+        decisions[i] = decision.model_copy(update={'subject_camera':fallback_camera.model_copy(
+            update={'points':[point], 'viewport':decision.subject_camera.viewport,
+                    'canvas_registered':False})})
+    return plan.model_copy(update={"decisions": decisions, "warnings": warnings,
+        'settings': plan.settings | {'photoshop_camera': 'fixed-reference-352',
+                                    'photoshop_reference_source': best_reference or '',
+                                    'photoshop_registered_shots':len(registered)}})

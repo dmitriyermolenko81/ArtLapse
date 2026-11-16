@@ -29,15 +29,19 @@ class Roi(Model):
 
 
 class CameraPoint(Model):
+    visible_region: Roi | None = None
+    reference_matched: bool = False
     time_us: int = Field(ge=0)
-    x: float = Field(ge=0, le=1)
-    y: float = Field(ge=0, le=1)
+    # A shared framing may put its centre outside a zoomed-in source image.
+    x: float = Field(ge=-32, le=32)
+    y: float = Field(ge=-32, le=32)
     width: float | None = Field(default=None, gt=0, le=32)
     height: float | None = Field(default=None, gt=0, le=32)
 
 
 class SubjectCamera(Model):
     viewport: Roi
+    canvas_registered: bool = False
     fit_subject: bool = False
     blur_background: bool = False
     fill_width: bool = False  # Accept plans written by the later Shorts renderer.
@@ -99,6 +103,7 @@ class ProjectSettings(Model):
     webcam_enabled: bool = False
     webcam_rois: dict[str, Roi | None] = Field(default_factory=dict)
     shorts_layout: Literal["auto", "square"] = "auto"
+    photoshop_keep_model: bool = False
     shorts_square_rois: dict[str, Roi] = Field(default_factory=dict)
     square_tracking_fps: int = Field(default=5, ge=1, le=15)
     square_tracking_dead_zone: float = Field(default=0.08, ge=0, le=0.25)

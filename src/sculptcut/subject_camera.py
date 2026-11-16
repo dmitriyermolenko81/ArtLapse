@@ -53,6 +53,8 @@ def tracking_clip(
     cancel: Event | None = None,
     output_frames: int | None = None,
     output_fps: int = 30,
+    *,
+    rgb: bool = False,
 ) -> Path:
     """Use the export decoder and timeline, never OpenCV's long-file seek."""
     ratio = output_frames / output_fps / ((end_us - start_us) / 1e6) if output_frames else 1.0
@@ -67,6 +69,13 @@ def tracking_clip(
             f",tpad=stop_mode=clone:stop_duration={output_frames / output_fps:.8f},"
             f"trim=end_frame={output_frames}"
         )
+    encoding = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "14"]
+    if rgb:
+        from sculptcut.video_color import RGB_ENCODER_ARGS, SDR_RGB_FILTER
+
+        destination = destination.with_suffix(".mkv")
+        filters = SDR_RGB_FILTER + "," + filters
+        encoding = ["-c:v", "ffv1", "-level", "3", "-pix_fmt", "bgr0", *RGB_ENCODER_ARGS]
     run_process(
         [
             discover("ffmpeg"),
@@ -83,12 +92,7 @@ def tracking_clip(
             "-an",
             "-vf",
             filters,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "ultrafast",
-            "-crf",
-            "14",
+            *encoding,
             str(destination),
         ],
         cancel,

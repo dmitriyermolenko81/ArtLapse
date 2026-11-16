@@ -26,7 +26,13 @@ from sculptcut.render_batches import coalesce_chunks
 from sculptcut.screen_cache import screen_check_cache
 from sculptcut.shorts_layout import SHORTS_PRESETS, square_composition, uses_square
 from sculptcut.subject_camera import camera_filter, still_frame
-from sculptcut.video_color import SDR_ENCODER_ARGS, SDR_FILTER
+from sculptcut.video_color import (
+    CANVAS_DELIVERY_CRF,
+    RGB_ENCODER_ARGS,
+    SDR_ENCODER_ARGS,
+    SDR_FILTER,
+    SDR_RGB_FILTER,
+)
 
 # Encode intermediates with more detail than the final delivery encode.
 INTERMEDIATE_QUALITY = 16
@@ -80,6 +86,7 @@ def normalize_timing(
     bookend_plan: RenderPlan | None = None,
     square_bands: bool = False,
     encoder: str = "auto",
+    quality: int = FINAL_CRF,
 ) -> list[int]:
     """Rebuild the frame clock, optionally replacing brief menu flashes.
 
@@ -114,7 +121,7 @@ def normalize_timing(
         if automatic:
             encoder = "h264_nvenc" if doctor().get("h264_nvenc") else "libx264"
         try:
-            _normalize(source, destination, fps, script, cancel, encoder)
+            _normalize(source, destination, fps, script, cancel, encoder, quality)
         except Cancelled:
             raise
         except MediaError:
@@ -122,7 +129,7 @@ def normalize_timing(
                 raise
             logging.getLogger("artlapse").warning("Final NVENC failed; retrying with CPU")
             destination.unlink(missing_ok=True)
-            _normalize(source, destination, fps, script, cancel, "libx264")
+            _normalize(source, destination, fps, script, cancel, "libx264", quality)
     return rejected
 
 
@@ -133,12 +140,13 @@ def _normalize(
     script: Path,
     cancel: Event | None,
     encoder: str = "libx264",
+    crf: int = FINAL_CRF,
 ) -> None:
     logging.getLogger("artlapse").info("Final video encoder: %s", encoder)
     quality = (
-        ["-preset", "p4", "-rc", "vbr", "-cq", str(FINAL_CRF), "-b:v", "0"]
+        ["-preset", "p4", "-rc", "vbr", "-cq", str(crf), "-b:v", "0"]
         if encoder == "h264_nvenc"
-        else ["-preset", "fast", "-crf", str(FINAL_CRF)]
+        else ["-preset", "fast", "-crf", str(crf)]
     )
     run_process(
         [
@@ -314,6 +322,15 @@ def render(
                                                     if k != "draft"}})
     if encoder not in ("auto", "libx264", "h264_nvenc"):
         raise ValueError("Unknown encoder")
+    from sculptcut.canvas_history import enabled as canvas_history_enabled
+
+    if canvas_history_enabled(project.settings) or plan.settings.get('photoshop_frame_only'):
+        plan = plan.model_copy(update={"settings": plan.settings | {
+            "canvas_color_pipeline": "rgb-lossless-356",
+            "canvas_delivery_crf": CANVAS_DELIVERY_CRF,
+            "canvas_continuity": ('current-frame-only-366'
+                if plan.settings.get('photoshop_frame_only') else 'hold-on-unmatched-357'),
+        }})
     selected = "h264_nvenc" if encoder != "libx264" and doctor().get("h264_nvenc") else "libx264"
     if encoder_status:
         encoder_status("NVIDIA NVENC · фильтры CPU" if selected == "h264_nvenc" else "CPU")
@@ -389,6 +406,11 @@ def _render(
     fps = plan.output_fps
     width, height = export_size(project, plan)
     square = uses_square(project.settings)
+    from sculptcut.canvas_history import enabled as canvas_history_enabled
+
+    lossless_canvas = bool(canvas_history_enabled(project.settings)
+                           or plan.settings.get('photoshop_frame_only'))
+    chunk_suffix = "mkv" if lossless_canvas else "mp4"
     finale = next(d for d in reversed(plan.decisions) if d.action != "DROP")
     with nullcontext(render_job(destination, plan, encoder, preview)) as directory:
         temporary = Path(directory)
@@ -396,7 +418,7 @@ def _render(
         completed = 0
         batches = coalesce_chunks(chunk_decisions(plan), sources, fps)
         for index, decision in enumerate(batches):
-            name = f"chunk-{index:06d}.mp4"
+            name = f"chunk-{index:06d}.{chunk_suffix}"
             if reusable_chunk(temporary, name):
                 names.append(name)
                 completed += decision.output_frame_count
@@ -460,7 +482,7 @@ def _render(
                     f"x='min(iw-ow,trunc(iw*{crop.x:.9f}/2)*2)':"
                     f"y='min(ih-oh,trunc(ih*{crop.y:.9f}/2)*2)',"
                 )
-            name = f"chunk-{index:06d}.mp4"
+            name = f"chunk-{index:06d}.{chunk_suffix}"
             composition = (
                 f"scale={width}:{height}:force_original_aspect_ratio=decrease:"
                 f"force_divisible_by=2:flags=lanczos,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
@@ -499,7 +521,7 @@ def _render(
                 f"setpts={pts_expression(decision,fps)},"
             )
             filter_path.write_text(
-                SDR_FILTER + "," + timing_filter +
+                (SDR_RGB_FILTER if lossless_canvas else SDR_FILTER) + "," + timing_filter +
                 f"fps={fps},trim=end_frame={count},{crop_filter}{composition}setsar=1,{still_motion}"
                 f"tpad=stop_mode=clone:stop_duration={padding:.8f}",
                 encoding="utf-8",
@@ -522,11 +544,11 @@ def _render(
                     "-frames:v",
                     str(count),
                     "-c:v",
-                    encoder,
-                    *codec_options,
+                    "ffv1" if lossless_canvas else encoder,
+                    *(["-level", "3", "-threads", "2"] if lossless_canvas else codec_options),
                     "-pix_fmt",
-                    "yuv420p",
-                    *SDR_ENCODER_ARGS,
+                    "bgr0" if lossless_canvas else "yuv420p",
+                    *(RGB_ENCODER_ARGS if lossless_canvas else SDR_ENCODER_ARGS),
                     str(temporary / name),
                 ],
                 cancel,
@@ -541,28 +563,44 @@ def _render(
         listing.write_text("".join(f"file '{name}'\n" for name in names), encoding="utf-8")
         combined = temporary / "combined.mp4"
         combined.unlink(missing_ok=True)
-        run_process(
-            [
-                discover("ffmpeg"),
-                "-v",
-                "error",
-                "-nostdin",
-                "-f",
-                "concat",
-                "-safe",
-                "1",
-                "-i",
-                str(listing),
-                "-c",
-                "copy",
-                "-movflags",
-                "+faststart",
-                str(combined),
-            ],
-            cancel,
-        )
+        if not lossless_canvas:
+            run_process(
+                [
+                    discover("ffmpeg"),
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-f",
+                    "concat",
+                    "-safe",
+                    "1",
+                    "-i",
+                    str(listing),
+                    "-c",
+                    "copy",
+                    "-movflags",
+                    "+faststart",
+                    str(combined),
+                ],
+                cancel,
+            )
         normalized = temporary / "normalized.mp4"
         normalized.unlink(missing_ok=True)
+        from sculptcut.canvas_history import compose_history
+
+        if lossless_canvas:
+            assembled = temporary / "canvas.mkv"
+            assembled.unlink(missing_ok=True)
+            compose_history(
+                [(temporary / name, decision)
+                 for name, decision in zip(names, batches, strict=True)],
+                sources, assembled, fps, width, height, cancel,
+                (lambda value: progress(.85 + value*.05)) if progress else None,
+                page_alignment=str(plan.settings.get('photoshop_camera', '')).startswith(
+                    'enclosed-page-'),
+                accumulate=not bool(plan.settings.get('photoshop_frame_only')),
+            )
+            combined = assembled
         guarded_frames = normalize_timing(
             combined,
             normalized,
@@ -572,6 +610,7 @@ def _render(
             bookend_plan=plan,
             square_bands=square,
             encoder=encoder,
+            quality=CANVAS_DELIVERY_CRF if lossless_canvas else FINAL_CRF,
         )
         combined = normalized
         if progress:

@@ -34,6 +34,7 @@ class TemplateOptions(Model):
     crop_roi: Roi
     crop_customized: bool
     shorts_layout: Literal["auto", "square"]
+    photoshop_keep_model: bool = False
     webcam_enabled: bool
     music: str
     music_selection: Literal["dynamic", "full_tracks"]

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.5
+
+Photoshop whole-model canvas, local ordinary framing, painting-stage preservation, duration, color and preview-deletion fixes. [Details](docs/releases/0.1.5.md).
+
 ## 0.1.3 — 2026-11-13
 
 - One source episode catalogue for every mode; modes choose different excerpts from it.

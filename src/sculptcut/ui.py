@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDoubleSpinBox,
@@ -515,6 +516,9 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self._trim_saved_revision: tuple[int, int] = (0, 0)
+        from sculptcut.application_identity import configure_multimedia_paths
+
+        configure_multimedia_paths()
         self.setWindowTitle(f"ArtLapse {__version__}")
         application_icon = QIcon(str(Path(__file__).parent / "assets" / "logo.ico"))
         QApplication.setWindowIcon(application_icon)
@@ -880,6 +884,14 @@ class MainWindow(QMainWindow):
         self.area_stack.addWidget(empty_area_page)
         self.frame_divider = category_divider()
         form.addRow(self.area_stack)
+        self.whole_model = QCheckBox(tr("Сохранять целую модель"))
+        self.whole_model.setToolTip(tr(
+            "Сохранять уже показанные части рисунка и обновлять видимую область. "
+            "При потере совмещения сохраняется последний надёжный вид."
+        ))
+        self.whole_model.hide()
+        self.whole_model.toggled.connect(self.whole_model_changed)
+        form.addRow(self.whole_model)
         self.webcam_rois: dict[Path, Roi | None] = {}
         self.webcam_enabled = QPushButton()
         self.webcam_enabled.setCheckable(True)
@@ -1302,6 +1314,7 @@ class MainWindow(QMainWindow):
                 self.preset,
                 self.frame_mode,
                 self.shorts_layout,
+                self.whole_model,
                 self.timelapse_mode,
                 self.shorts_mode,
                 self.duration_card,
@@ -1378,8 +1391,8 @@ class MainWindow(QMainWindow):
         compact = self.settings_scroll.viewport().height() < 600
         self.settings_layout.setContentsMargins(0, 0, 0, 0)
         self.settings_layout.setSpacing(0)
-        self.mode_settings_layout.setContentsMargins(*((12, 2, 12, 0) if compact
-                                                      else (16, 14, 16, 14)))
+        margins = (16, 10, 16, 10) if not self.whole_model.isHidden() else (16, 14, 16, 14)
+        self.mode_settings_layout.setContentsMargins(*((12, 2, 12, 0) if compact else margins))
         for mode_button in (self.timelapse_mode, self.shorts_mode):
             mode_button.setFixedHeight(36 if compact else 40)
         self.settings_form.setVerticalSpacing(2 if compact else 8)
@@ -1437,6 +1450,7 @@ class MainWindow(QMainWindow):
             "frame_mode": self.frame_mode.currentData(),
             "crop_roi": self.crop_roi.model_dump(), "crop_customized": self.crop_customized,
             "shorts_layout": self.shorts_layout.currentData(),
+            "photoshop_keep_model": self.whole_model.isChecked(),
             "square_rois": {str(p): roi.model_dump() for p, roi in self.square_rois.items()},
         }
 
@@ -1452,6 +1466,7 @@ class MainWindow(QMainWindow):
             "frame_mode": self.frame_mode.currentData(),
             "crop_roi": self.crop_roi.model_dump(), "crop_customized": self.crop_customized,
             "shorts_layout": self.shorts_layout.currentData(),
+            "photoshop_keep_model": self.whole_model.isChecked(),
             "webcam_enabled": self.webcam_enabled.isChecked(),
             "music": self.music.text(), "music_selection": self.music_selection.currentData(),
             "intro": self.intro_image.text(), "presentation_seconds": self.presentation_seconds,
@@ -1471,6 +1486,7 @@ class MainWindow(QMainWindow):
         self.crop_customized = options.crop_customized
         self.frame_mode.setCurrentIndex(self.frame_mode.findData(options.frame_mode))
         self.shorts_layout.setCurrentIndex(self.shorts_layout.findData(options.shorts_layout))
+        self.whole_model.setChecked(options.photoshop_keep_model)
         self.webcam_enabled.blockSignals(True)
         self.webcam_enabled.setChecked(options.webcam_enabled)
         self.webcam_enabled.blockSignals(False)
@@ -1625,6 +1641,7 @@ class MainWindow(QMainWindow):
             self.preset.setCurrentIndex(self.preset.findData(draft["preset"]))
             self.frame_mode.setCurrentIndex(self.frame_mode.findData(draft["frame_mode"]))
             self.shorts_layout.setCurrentIndex(self.shorts_layout.findData(draft["shorts_layout"]))
+            self.whole_model.setChecked(bool(draft.get("photoshop_keep_model", False)))
             self.crop_roi = roi
             self.crop_customized = bool(draft["crop_customized"])
             self.square_rois = squares
@@ -1681,6 +1698,7 @@ class MainWindow(QMainWindow):
                 "crop_mode": self.frame_mode.currentData() if preset == "timelapse" else "full",
                 "timelapse_viewport_roi": self.crop_roi,
                 "shorts_layout": self.shorts_layout.currentData(),
+                "photoshop_keep_model": self.whole_model.isChecked(),
                 "sculpt_only": preset in ("shorts", "beat_shorts", "music_shorts"),
                 "music_path": music if music and music.is_file() else None,
                 "music_folder": music if music and not music.is_file() else None,
@@ -2051,7 +2069,17 @@ class MainWindow(QMainWindow):
             self.update_aspect_captions()
             self.invalidate_episodes()
 
+    def whole_model_changed(self) -> None:
+        if hasattr(self, "seek"):
+            self.invalidate_episodes()
+
     def square_layout_changed(self) -> None:
+        self.whole_model.setVisible(
+            self.preset.currentData() in ("photoshop_shorts", "photoshop_music_shorts")
+            and self.shorts_layout.currentData() == "auto"
+        )
+        if hasattr(self, "settings_scroll"):
+            self.fit_settings_layout()
         if hasattr(self, "seek"):
             self.invalidate_episodes()
 
@@ -2117,6 +2145,7 @@ class MainWindow(QMainWindow):
         self.shorts_layout.setCurrentIndex(
             self.shorts_layout.findData(project.settings.shorts_layout)
         )
+        self.whole_model.setChecked(project.settings.photoshop_keep_model)
         self.square_layout_changed()
 
     def choose_square_area(self, source: Path | None = None) -> bool:
@@ -2593,6 +2622,13 @@ class MainWindow(QMainWindow):
             self.episode_panel.close()
             self.episode_panel = None
         paths = {entry.path for entry in selected}
+        editing_video = getattr(self.selection_dialog, 'video', None)
+        if self.selection_dialog is not None and (whole or (
+            isinstance(editing_video, Path) and editing_video.resolve() in paths
+        )):
+            # The inline editor owns separate preview/audio players even when hidden.
+            # Closing it stops its workers and releases those files before deletion.
+            self.selection_dialog.reject()
         current = self.player.source().toLocalFile()
         if whole or (current and Path(current).resolve() in paths):
             self.output_editor.hide()
@@ -4192,6 +4228,7 @@ class MainWindow(QMainWindow):
                     "crop_mode": frame_crop_mode,
                     "timelapse_viewport_roi": frame_crop_roi,
                     "shorts_layout": shorts_layout,
+                    "photoshop_keep_model": self.whole_model.isChecked(),
                     "shorts_square_rois": {
                         source.id: square_rois[source.path.resolve()]
                         for source in project.sources if source.path.resolve() in square_rois
