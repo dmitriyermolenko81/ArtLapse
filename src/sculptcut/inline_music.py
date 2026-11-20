@@ -9,12 +9,12 @@ from PySide6.QtWidgets import QFileDialog
 
 from sculptcut.export_storage import metadata_path
 from sculptcut.i18n import tr
-from sculptcut.media import probe
 from sculptcut.music_edit import (
     LOCKED_MUSIC_REASON,
     MusicClip,
     assemble_music,
     draft_path,
+    embedded_music,
     insert_music_clip,
     music_edit_locked,
     parse_music_clips,
@@ -51,9 +51,8 @@ class InlineMusic(MusicEditDialog):
         self.volume_state = owner.volume_state
         self.volume_state.changed.connect(self.monitor)
         self.manual = not self.locked and draft_path(self.root, self.video).is_file()
-        self.baseline = (saved if saved is not None else
-            [MusicClip(path=self.video, start_us=0, end_us=self.duration, at_us=0)]
-            if probe(self.video).audio_streams else [])
+        self.baseline = (saved if saved is not None else self.clips if self.locked
+                         else embedded_music(self.video, self.media_info))
         self.lane.source_titles[self.video] = tr('Звук ролика')
         if self.locked:
             self.lane.source_titles[self.video] = tr('Под бит · только просмотр')

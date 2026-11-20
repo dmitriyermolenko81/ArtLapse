@@ -1,8 +1,14 @@
 """Keep managed export directories free of generated metadata."""
 
+import logging
 import os
 import shutil
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from threading import Event
+
+LOGGER = logging.getLogger(__name__)
 
 
 def has_exports(directory: Path) -> bool:
@@ -48,6 +54,59 @@ def metadata_path(video: Path, suffix: str) -> Path:
 
 def music_relative_path(music: Path, video: Path) -> str:
     return os.path.relpath(music, video.parent)
+
+
+def publication_lock(video: Path) -> Path:
+    return metadata_path(video, ".publishing")
+
+
+def variant_assets(video: Path) -> Path:
+    return metadata_directory(video) / ".variant-assets" / video.stem
+
+
+@contextmanager
+def publish_export(
+    ready: Path, video: Path, cancel: Event | None,
+    *, extra_files: tuple[Path, ...] = (),
+) -> Iterator[None]:
+    """Write companion files under a reservation, then publish the verified MP4."""
+    from sculptcut.media import Cancelled
+
+    lock = publication_lock(video)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.mkdir()
+    assets = variant_assets(video)
+    files = (metadata_path(video, ".variant.json"), *extra_files)
+    try:
+        if any(os.path.lexists(path) for path in (
+            video, video.with_suffix(".variant.json"), assets, *files,
+        )):
+            raise FileExistsError(f"Export path already in use: {video.name}")
+        if cancel is not None and cancel.is_set():
+            raise Cancelled("Сохранение отменено")
+        try:
+            yield
+            if cancel is not None and cancel.is_set():
+                raise Cancelled("Сохранение отменено")
+            if os.name == "nt":
+                ready.rename(video)  # Windows rename cannot replace an existing file.
+            else:
+                os.link(ready, video)
+        except BaseException:
+            for path in (*files, assets):
+                try:
+                    if path == assets and path.is_dir():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink(missing_ok=True)
+                except OSError:
+                    LOGGER.exception("Could not roll back export file %s", path)
+            raise
+    finally:
+        try:
+            lock.rmdir()
+        except OSError:
+            LOGGER.exception("Could not remove export reservation %s", lock)
 
 
 def organize_exports(root: Path) -> None:

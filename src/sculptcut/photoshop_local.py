@@ -15,7 +15,7 @@ from sculptcut.drawing_page import enclosed_page, lock_page_points, page_colour
 from sculptcut.drawing_reference import DrawingReference, locked_reference_points
 from sculptcut.media import Cancelled, MediaError
 from sculptcut.planning import RenderDecision
-from sculptcut.subject_camera import still_frame
+from sculptcut.subject_camera import read_still, still_frame
 from sculptcut.webcam import AnalysisCapture, webcam_roi
 
 Reference = tuple[float, int, Roi, Roi]
@@ -58,10 +58,7 @@ def local_shots(
                     1e6*source.fps_den/max(1,source.fps_num)))
             image_path = still_frame(source,timestamp,path.with_suffix('.hold.png'),
                                      cancel,sample_width=960)
-            decoded_still = cv2.imread(str(image_path))
-            if decoded_still is None:
-                raise MediaError('Cannot decode local Photoshop still')
-            still = np.asarray(decoded_still,dtype=np.uint8)
+            still = read_still(image_path)
             page = enclosed_page(still,rotated=True)
             box, view = drawing_and_canvas_box(still)
             visible = page or view or viewport

@@ -31,6 +31,7 @@ class Roi(Model):
 class CameraPoint(Model):
     visible_region: Roi | None = None
     reference_matched: bool = False
+    flip_horizontal: bool = False
     time_us: int = Field(ge=0)
     # A shared framing may put its centre outside a zoomed-in source image.
     x: float = Field(ge=-32, le=32)
@@ -42,6 +43,8 @@ class CameraPoint(Model):
 class SubjectCamera(Model):
     viewport: Roi
     canvas_registered: bool = False
+    frame_only: bool = False
+    closeup_group: int | None = Field(default=None, ge=0)
     fit_subject: bool = False
     blur_background: bool = False
     fill_width: bool = False  # Accept plans written by the later Shorts renderer.

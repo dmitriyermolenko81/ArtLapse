@@ -11,16 +11,23 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from sculptcut.canvas_edges import trim_horizontal_chrome
+from sculptcut.canvas_edges import dark_document_bounds, trim_horizontal_chrome
+from sculptcut.canvas_history import enabled as keep_whole_canvas
 from sculptcut.domain import CameraPoint, Project, Roi, SubjectCamera
 from sculptcut.drawing_page import SETTINGS as PAGE
 from sculptcut.drawing_page import enclosed_page, lock_page_points, page_colour, page_subject
 from sculptcut.drawing_reference import SETTINGS as REFERENCE
 from sculptcut.drawing_reference import DrawingReference, locked_reference_points
 from sculptcut.media import Cancelled, MediaError
+from sculptcut.photoshop_closeup import (
+    add_closeups,
+    horizontal_focus,
+    red_mask_candidate,
+    transient_masks,
+)
 from sculptcut.planning import RenderPlan
 from sculptcut.shorts import viewport_shorts_camera
-from sculptcut.subject_camera import still_frame, tracking_clip
+from sculptcut.subject_camera import read_still, still_frame, tracking_clip
 from sculptcut.webcam import AnalysisCapture, webcam_roi
 
 
@@ -448,8 +455,14 @@ def reframe_photoshop(
     measured_boxes: dict[int, list[Roi | None]] = {}
     page_samples: dict[int, list[Roi | None]] = {}
     canvas_samples: dict[int, list[Roi | None]] = {}
+    closeup_views: dict[int, list[Roi | None]] = {}
+    closeup_focuses: dict[int, list[float | None]] = {}
+    mask_samples: dict[str, list[tuple[int, int, bool | None]]] = {}
+    dark_workspace_shots: set[int] = set()
+    dark_workspace_sources: set[str] = set()
     sketch_samples: dict[int, list[bool]] = {}
     page_background = None
+    whole_canvas = keep_whole_canvas(project.settings)
     with tempfile.TemporaryDirectory(prefix="sculptcut-drawing-") as temporary:
         for index, decision in enumerate(plan.decisions):
             if cancel and cancel.is_set():
@@ -470,10 +483,14 @@ def reframe_photoshop(
             reader = AnalysisCapture(clip, webcam_roi(project.settings, decision.source_id))
             samples: list[tuple[int, Roi | None]] = []
             canvases: list[Roi] = []
+            document_views: dict[int, Roi] = {}
+            manual = project.rois.get(decision.source_id)
             previous = None
             fallback = False
             pages: list[Roi | None] = []
             visible_canvases: list[Roi | None] = []
+            safe_views: list[Roi | None] = []
+            focuses: list[float | None] = []
             sketches: list[bool] = []
             try:
                 frame_index = 0
@@ -485,7 +502,20 @@ def reframe_photoshop(
                         break
                     if frame_index >= decision.output_frame_count:
                         break
-                    box, canvas = drawing_and_canvas_box(frame.astype(np.uint8), previous)
+                    document = (dark_document_bounds(frame)
+                                if whole_canvas and manual is None else None)
+                    if document is None:
+                        box, canvas = drawing_and_canvas_box(frame, previous)
+                    else:
+                        x, y, doc_right, doc_bottom = document
+                        h, w = frame.shape[:2]
+                        cw, ch = doc_right-x, doc_bottom-y
+                        canvas = Roi(x=x/w, y=y/h, width=cw/w, height=ch/h)
+                        document_views[frame_index] = canvas
+                        box, _ = drawing_and_canvas_box(frame[y:doc_bottom, x:doc_right])
+                        if box is not None:
+                            box = Roi(x=(x+box.x*cw)/w, y=(y+box.y*ch)/h,
+                                      width=box.width*cw/w, height=box.height*ch/h)
                     page = enclosed_page(frame.astype(np.uint8),rotated=ordinary)
                     sketch = False
                     if page is not None and (box is None or box.width*box.height >= (
@@ -497,14 +527,22 @@ def reframe_photoshop(
                     pages.append(page)
                     visible_canvases.append(canvas)
                     sketches.append(sketch)
+                    red_mask = document is not None and red_mask_candidate(frame, document)
+                    if whole_canvas:
+                        safe_view = ((document_views.get(frame_index) or page)
+                                     if manual is None and not red_mask else None)
+                        safe_views.append(safe_view)
+                        focuses.append(horizontal_focus(frame, box, safe_view))
+                        mask_samples.setdefault(decision.source_id, []).append((
+                            index, frame_index, red_mask if document is not None else None))
                     if page is not None and page_background is None:
                         page_background = page_colour(frame.astype(np.uint8), page)
                     if canvas is not None:
                         canvases.append(canvas)
                     if box is not None:
                         previous = box
-                    view = project.rois.get(decision.source_id) or canvas
-                    if box is not None and view is not None:
+                    view = manual or canvas
+                    if box is not None and view is not None and not red_mask:
                         edge = REFERENCE.reference_edge_margin
                         edges = sum((box.x <= view.x+edge, box.y <= view.y+edge,
                             box.x+box.width >= view.x+view.width-edge,
@@ -536,7 +574,19 @@ def reframe_photoshop(
             width, height = source.width, source.height
             if source.rotation % 180 == 90:
                 width, height = height, width
-            viewport = drawing_viewport(canvases, project.rois.get(decision.source_id))
+            viewport = drawing_viewport(canvases, manual)
+            if document_views:
+                # Decode the union, but require a fresh document detection for
+                # each pixel update once this workspace is confirmed.
+                dark_workspace_shots.add(index)
+                dark_workspace_sources.add(decision.source_id)
+                confirmed = document_views.values()
+                left = min(view.x for view in confirmed)
+                top = min(view.y for view in confirmed)
+                right = max(view.x+view.width for view in confirmed)
+                bottom = max(view.y+view.height for view in confirmed)
+                viewport = Roi(x=left, y=top, width=right-left, height=bottom-top)
+                visible_canvases = [document_views.get(i) for i in range(len(samples))]
             camera = stable_camera(
                 samples, plan.output_fps, width, height,
                 project.settings.shorts_tracking_margin, SETTINGS.motion_lock_center_range,
@@ -546,6 +596,8 @@ def reframe_photoshop(
             measured_boxes[index] = [box for _, box in samples]
             page_samples[index] = pages
             canvas_samples[index] = visible_canvases
+            closeup_views[index] = safe_views
+            closeup_focuses[index] = focuses
             sketch_samples[index] = sketches
             if fallback:
                 warnings.append(
@@ -554,6 +606,11 @@ def reframe_photoshop(
                 )
             if progress:
                 progress(.5*(index + 1) / len(plan.decisions))
+        for samples_by_source in mask_samples.values():
+            for shot, frame_index in transient_masks(samples_by_source, plan.output_fps):
+                canvas_samples[shot][frame_index] = None
+                page_samples[shot][frame_index] = None
+                closeup_views[shot][frame_index] = None
         # All selected episodes are fitted to the most complete view, rather than
         # centring a leg/detail crop as if it were the whole drawing.
         total_samples = sum(len(samples) for samples in page_samples.values())
@@ -598,8 +655,7 @@ def reframe_photoshop(
                             1_000_000*source.fps_den/source.fps_num))
                     image_path = still_frame(source, timestamp,
                         Path(temporary)/f'page-hold-{index}.png', cancel, sample_width=960)
-                    still = cv2.imread(str(image_path))
-                    page = enclosed_page(np.asarray(still, dtype=np.uint8))
+                    page = enclosed_page(read_still(image_path))
                     pages = [page]*len(times)
                 poses = []
                 views = []
@@ -646,13 +702,14 @@ def reframe_photoshop(
                     decisions[i] = decisions[i].model_copy(update={'subject_camera':
                         page_camera.model_copy(update={'points':[
                             next(locked) for _ in page_camera.points]})})
-            if progress:
-                progress(1.0)
+            closeups = add_closeups(project, decisions, plan.output_fps, clips,
+                                   measured_boxes, closeup_views, closeup_focuses, cancel,
+                                   (lambda value: progress(.5+.5*value)) if progress else None)
             return plan.model_copy(update={'decisions':decisions, 'settings':plan.settings | {
                 'photoshop_camera':'enclosed-page-361', 'photoshop_registered_shots':sum(
                     bool(d.output_frame_count and d.subject_camera
                          and d.subject_camera.canvas_registered) for d in decisions),
-                'photoshop_reference_source':'page'},
+                'photoshop_reference_source':'page', 'photoshop_closeup_shots':closeups},
                 'warnings':[w for w in warnings if not w.startswith('Photoshop:')]})
         registrations = {}
         # One reference for the whole montage, not a new frame for each input file.
@@ -672,9 +729,13 @@ def reframe_photoshop(
         source_references: dict[str, list[DrawingReference]] = {}
         for number, (index, (clip, times, viewport)) in enumerate(clips.items()):
             registration = reference
-            anchors = source_references.get(decisions[index].source_id, [])
+            source_id = decisions[index].source_id
+            manual = project.rois.get(source_id)
+            anchors = source_references.get(source_id, [])
+            require_page = source_id in dark_workspace_sources and index not in dark_workspace_shots
             anchor_image = None
             anchor_point = None
+            anchor_view = viewport
             points: list[CameraPoint | None] = []
             if registration is not None:
                 reader = AnalysisCapture(clip, webcam_roi(
@@ -691,13 +752,20 @@ def reframe_photoshop(
                         # detail of a distant reference and suddenly halve the scale.
                         point = None
                         score = 0.0
-                        features = registration.features(frame, viewport)
+                        visible = (page_samples if require_page else canvas_samples)[index][
+                            len(points)]
+                        if whole_canvas and visible is None:
+                            points.append(None)
+                            continue
+                        match_view = (manual or visible or viewport) if whole_canvas else viewport
+                        features = registration.features(frame, match_view)
                         for candidate in [*anchors, registration]:
-                            matched = candidate.point(frame, viewport, t, features)
+                            matched = candidate.point(frame, match_view, t, features)
                             if matched is not None and candidate.last_score > score:
                                 point, score = matched, candidate.last_score
                         if point is not None:
                             anchor_image, anchor_point = frame.copy(), point
+                            anchor_view = match_view
                         # Textureless complete drawings can still provide a reliable bbox.
                         # Never use a clipped detail/head as a replacement full-body reference.
                         box = measured_boxes[index][len(points)]
@@ -721,7 +789,6 @@ def reframe_photoshop(
                                 point = pose.model_copy(update={'time_us':t,
                                     'width':pose.width or tracking.width,
                                     'height':pose.height or tracking.height})
-                        visible = canvas_samples[index][len(points)]
                         if point is not None and visible is not None:
                             left, top = max(visible.x, viewport.x), max(visible.y, viewport.y)
                             right = min(visible.x+visible.width, viewport.x+viewport.width)
@@ -762,31 +829,38 @@ def reframe_photoshop(
                         or abs(anchor_point.y-a.camera.points[0].y)/anchor_point.height
                             > REFERENCE.anchor_translation_fraction for a in bank)
                     if diverse and len(bank) < REFERENCE.source_anchors:
-                        bank.append(DrawingReference(anchor_image, viewport, camera.model_copy(
+                        bank.append(DrawingReference(anchor_image, anchor_view, camera.model_copy(
                             update={'width':anchor_point.width, 'height':anchor_point.height,
                                     'points':[anchor_point]})))
             else:
                 warnings.append('Photoshop: no reliable reference match; fixed framing retained: '
                                 + decisions[index].source_id)
             if progress:
-                progress(.5+.5*(number+1)/max(1,len(clips)))
-    for i, decision in enumerate(decisions):
-        if not decision.output_frame_count or i in registered:
-            continue
-        neighbors = [j for j in registered if decisions[j].source_id == decision.source_id]
-        if neighbors:
-            j = min(neighbors, key=lambda j: abs(
-                decisions[j].source_start_us-decision.source_start_us))
-            fallback_camera = decisions[j].subject_camera
-        else:
-            fallback_camera = reference.camera if reference is not None else decision.subject_camera
-        assert fallback_camera is not None and decision.subject_camera is not None
-        point = fallback_camera.points[0].model_copy(
-            update={'time_us':decision.source_start_us})
-        decisions[i] = decision.model_copy(update={'subject_camera':fallback_camera.model_copy(
-            update={'points':[point], 'viewport':decision.subject_camera.viewport,
-                    'canvas_registered':False})})
+                fraction = .4 if whole_canvas else .5
+                progress(.5+fraction*(number+1)/max(1,len(clips)))
+        for i, decision in enumerate(decisions):
+            if not decision.output_frame_count or i in registered:
+                continue
+            neighbors = [j for j in registered if decisions[j].source_id == decision.source_id]
+            if neighbors:
+                j = min(neighbors, key=lambda j: abs(
+                    decisions[j].source_start_us-decision.source_start_us))
+                fallback_camera = decisions[j].subject_camera
+            else:
+                fallback_camera = (reference.camera if reference is not None
+                                   else decision.subject_camera)
+            assert fallback_camera is not None and decision.subject_camera is not None
+            point = fallback_camera.points[0].model_copy(
+                update={'time_us':decision.source_start_us})
+            decisions[i] = decision.model_copy(update={'subject_camera':fallback_camera.model_copy(
+                update={'points':[point], 'viewport':decision.subject_camera.viewport,
+                        'canvas_registered':False})})
+        closeups = (add_closeups(project, decisions, plan.output_fps, clips,
+                                measured_boxes, closeup_views, closeup_focuses, cancel,
+                                (lambda value: progress(.9+.1*value)) if progress else None)
+                    if whole_canvas else 0)
     return plan.model_copy(update={"decisions": decisions, "warnings": warnings,
         'settings': plan.settings | {'photoshop_camera': 'fixed-reference-352',
                                     'photoshop_reference_source': best_reference or '',
-                                    'photoshop_registered_shots':len(registered)}})
+                                    'photoshop_registered_shots':len(registered),
+                                    'photoshop_closeup_shots':closeups}})

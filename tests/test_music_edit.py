@@ -15,12 +15,15 @@ from test_cursor_playback import finish
 from test_episode_panel import wait_until
 
 from sculptcut.domain import ProjectSettings
+from sculptcut.export_storage import metadata_path, ordered_exports, variant_assets
 from sculptcut.fixtures import generate_fixture
-from sculptcut.media import Cancelled, discover, run_process
+from sculptcut.media import Cancelled, discover, probe, run_process
 from sculptcut.music_edit import (
     MusicClip,
     apply_music_edit,
     assemble_music,
+    draft_path,
+    embedded_music,
     load_draft,
     save_draft,
     validate_clips,
@@ -53,6 +56,53 @@ def music_movie(tmp_path):
     clips = [MusicClip(path=tracks[0], start_us=1_000_000, end_us=2_000_000, at_us=500_000),
              MusicClip(path=tracks[1], start_us=0, end_us=1_000_000, at_us=2_000_000)]
     return root, video, clips
+
+
+def test_failed_music_history_write_leaves_no_export_and_can_retry(music_movie, monkeypatch):
+    from sculptcut import music_edit
+
+    root, video, clips = music_movie
+    output = root/'renders'/'retry.mp4'
+    lane = metadata_path(output, '.music-edit.json')
+    snapshot = metadata_path(output, '.variant.json')
+    draft = draft_path(root, output)
+    write = music_edit.atomic_write
+
+    def fail_last_write(path, data):
+        if path == lane:
+            assert snapshot.is_file() and draft.is_file()
+            assert ordered_exports(output.parent) == []
+            raise OSError(28, 'No space left on device')
+        write(path, data)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(music_edit, 'atomic_write', fail_last_write)
+        with pytest.raises(OSError, match='No space left'):
+            apply_music_edit(root, video, clips, Event(), destination=output)
+    assert video.is_file()
+    assert not any(p.exists() for p in (output, snapshot, draft, lane, variant_assets(output)))
+    assert apply_music_edit(root, video, clips, Event(), destination=output) == output
+    assert load_draft(root, output) == clips
+    assert read_variant(output)['operation'] == 'music'
+    verify_output(output, 90, 30, expected_audio=True)
+
+
+def test_short_embedded_audio_keeps_silent_tail(tmp_path):
+    video = tmp_path/'short-audio.mp4'
+    run_process([discover('ffmpeg'), '-v', 'error', '-f', 'lavfi', '-i',
+                 'color=s=64x64:r=10:d=2', '-f', 'lavfi', '-i', 'sine=duration=0.5',
+                 '-c:v', 'libx264', '-c:a', 'aac', str(video)])
+    clips = embedded_music(video, probe(video))
+    assert len(clips) == 1 and abs(clips[0].end_us-500_000) <= 1_000
+    output = apply_music_edit(tmp_path, video, clips, Event())
+    verify_output(output, 20, 10, expected_audio=True)
+    wav = tmp_path/'result.wav'
+    run_process([discover('ffmpeg'), '-v', 'error', '-i', str(output), '-vn',
+                 '-ac', '1', '-ar', '48000', str(wav)])
+    with wave.open(str(wav)) as reader:
+        samples = np.frombuffer(reader.readframes(reader.getnframes()), dtype='<i2')
+    assert np.abs(samples[:20000]).max() > 100
+    assert len(samples) >= 96000 and not samples[30000:96000].any()
 
 
 def test_real_music_intervals_silence_packet_copy_history_and_reopen(music_movie):

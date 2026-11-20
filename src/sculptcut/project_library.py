@@ -21,17 +21,33 @@ def merge_projects(shared: QSettings, previous: QSettings) -> None:
     key = "imports/" + hashlib.sha256(previous.fileName().casefold().encode()).hexdigest()
     signature = hashlib.sha256(json.dumps(values, ensure_ascii=False).encode()).hexdigest()
     shared.sync()
-    if shared.value(key) == signature:
+    snapshot = key + "_paths"
+    previous_signature = shared.value(key)
+    if previous_signature == signature and shared.contains(snapshot):
         return
     paths = project_paths(shared)
     known = {str(Path(p)).casefold() for p in paths}
-    for p in values:
+    prior = shared.value(snapshot, [])
+    if isinstance(prior, list):
+        known.update(str(Path(p)).casefold() for p in prior if isinstance(p, str) and p)
+    # Upgrade a digest-only record without replaying an unchanged import.
+    for p in values if previous_signature != signature else []:
         if str(Path(p)).casefold() not in known:
             paths.append(p)
             known.add(str(Path(p)).casefold())
     shared.setValue("recent_projects", paths)
     shared.setValue(key, signature)
+    shared.setValue(snapshot, values)
     shared.sync()
+
+
+def store_projects(shared: QSettings, local: QSettings, paths: list[str]) -> None:
+    """An explicit library edit also marks its compatibility copy as already seen."""
+    shared.setValue("recent_projects", paths)
+    shared.sync()
+    local.setValue("recent_projects", paths)
+    local.sync()
+    merge_projects(shared, local)
 
 
 def previous_settings() -> list[Path]:

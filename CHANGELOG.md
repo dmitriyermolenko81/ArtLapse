@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.7
+
+Stable Photoshop close-ups and export history improvements. [Details](docs/releases/0.1.7.md).
+
 ## 0.1.6
 
 Music Apply and shared project library fixes. [Details](docs/releases/0.1.6.md).

@@ -20,7 +20,7 @@ from sculptcut.subject_camera import center_at, size_at
 if TYPE_CHECKING:
     from sculptcut.planning import RenderDecision
 
-VERSION = 365
+VERSION = 377
 Bounds = tuple[int, int, int, int]
 
 
@@ -28,6 +28,7 @@ Bounds = tuple[int, int, int, int]
 class CanvasSettings:
     border_inset_pixels: int = 2
     source_border_fraction: float = .005
+    registered_source_inset_fraction: float = .010
     feather_pixels: int = 6
     alignment_side: int = 720
     alignment_corners: int = 200
@@ -157,7 +158,8 @@ def enabled(settings: ProjectSettings) -> bool:
 
 
 def visible_bounds(camera: SubjectCamera, time_us: int, source_width: int,
-                   source_height: int, width: int, height: int) -> Bounds:
+                   source_height: int, width: int, height: int,
+                   *, source_inset_fraction: float = 0) -> Bounds:
     """The source rectangle actually overlaid by camera_filter, excluding its border."""
     x, y, r, b = pixel_bounds(camera.viewport, source_width, source_height)
     cw, ch = size_at(camera, time_us)
@@ -171,17 +173,21 @@ def visible_bounds(camera: SubjectCamera, time_us: int, source_width: int,
     left = width/2 - (cx*source_width-x)*sw/(r-x)
     top = height/2 - (cy*source_height-y)*sh/(b-y)
     point = min(camera.points, key=lambda p: abs(p.time_us-time_us))
+    sx, sy = sw/(r-x), sh/(b-y)
     if point.visible_region is not None:
         px, py, pr, pb = pixel_bounds(point.visible_region, source_width, source_height)
-        sx, sy = sw/(r-x), sh/(b-y)
         left, top = left+(px-x)*sx, top+(py-y)*sy
         sw, sh = round((pr-px)*sx), round((pb-py)*sy)
+    source_inset = (min(source_width, source_height)*source_inset_fraction
+                    if point.visible_region is not None else 0)
     inset = max(SETTINGS.border_inset_pixels,
                 round(min(sw, sh)*SETTINGS.source_border_fraction))
-    return (max(0, min(width, int(np.ceil(left))+inset)),
-            max(0, min(height, int(np.ceil(top))+inset)),
-            max(0, min(width, int(np.floor(left+sw))-inset)),
-            max(0, min(height, int(np.floor(top+sh))-inset)))
+    ix = max(inset, int(np.ceil(source_inset*sx)))
+    iy = max(inset, int(np.ceil(source_inset*sy)))
+    return (max(0, min(width, int(np.ceil(left))+ix)),
+            max(0, min(height, int(np.ceil(top))+iy)),
+            max(0, min(width, int(np.floor(left+sw))-ix)),
+            max(0, min(height, int(np.floor(top+sh))-iy)))
 
 
 class CanvasMemory:
@@ -203,7 +209,8 @@ class CanvasMemory:
         self.updates = 0
 
     def update(self, frame: NDArray[np.uint8], bounds: Bounds,
-               background_bgr: tuple[int, int, int] | None = None) -> NDArray[np.uint8]:
+               background_bgr: tuple[int, int, int] | None = None, *,
+               refine_alignment: bool = True) -> NDArray[np.uint8]:
         bounds = trim_horizontal_chrome(frame, bounds)
         if self.canvas is None or self.canvas.shape != frame.shape:
             self.reset()
@@ -211,7 +218,7 @@ class CanvasMemory:
             self.canvas[:] = frame[0, 0] if background_bgr is None else background_bgr
             self.known = np.zeros(frame.shape[:2], dtype=np.bool_)
         assert self.known is not None
-        if np.any(self.known):
+        if refine_alignment and np.any(self.known):
             # Register against immutable artwork snapshots first. Repeatedly
             # fitting to yesterday's resampled pixels accumulates scale drift.
             transform = None
@@ -261,8 +268,8 @@ class CanvasMemory:
                     margin[:] = self.canvas[row]
             clear_outer_guides(self.canvas)
         self.updates += 1
-        if self.refined and (not self.references
-                             or self.updates % SETTINGS.alignment_reference_interval == 0):
+        if self.refined and refine_alignment and (not self.references
+                or self.updates % SETTINGS.alignment_reference_interval == 0):
             # Fixed-size ring: the earliest usable view plus recent development.
             # Never store the source sequence or use future paint as output.
             if _patch_transform(self.canvas, self.canvas, self.known, bounds) is not None:
@@ -281,15 +288,39 @@ class CanvasMemory:
         return self.canvas
 
 
+def update_closeup(memory: CanvasMemory, frame: NDArray[np.uint8], camera: SubjectCamera,
+                   time_us: int, source_width: int, source_height: int
+                   ) -> NDArray[np.uint8] | None:
+    """Paste only aligned, verified document pixels into the local artwork."""
+    point = min(camera.points, key=lambda p: abs(p.time_us-time_us))
+    if not point.reference_matched or point.visible_region is None:
+        return memory.canvas
+    height, width = frame.shape[:2]
+    bounds = visible_bounds(camera, time_us, source_width, source_height, width, height,
+                            source_inset_fraction=SETTINGS.registered_source_inset_fraction)
+    x, y, r, b = bounds
+    if r <= x or b <= y:
+        return memory.canvas
+    if point.flip_horizontal:
+        frame = np.asarray(cv2.flip(frame, 1), dtype=np.uint8)
+        bounds = width-r, y, width-x, b
+    rgb = camera.background_rgb or (camera.background,)*3
+    return memory.update(frame, bounds, (rgb[2], rgb[1], rgb[0]), refine_alignment=False)
+
+
 def compose_history(chunks: Sequence[tuple[Path, "RenderDecision"]],
                     sources: dict[str, SourceMedia], destination: Path, fps: int,
                     width: int, height: int, cancel: Event | None = None,
                     progress: Callable[[float], None] | None = None,
-                    *, page_alignment: bool = False, accumulate: bool = True) -> None:
+                    *, page_alignment: bool = False, accumulate: bool = True,
+                    guard_document_edges: bool = False) -> None:
     """Lossless intermediate; the normal delivery pass supplies SDR tags and audio."""
     if cancel and cancel.is_set():
         raise Cancelled("Canvas assembly cancelled")
     memory = CanvasMemory(refined=page_alignment)
+    local = CanvasMemory()
+    local_group = None
+    last_closeup = None
     total = sum(d.output_frame_count for _, d in chunks)
     completed = 0
     writer = cv2.VideoWriter(str(destination), cv2.VideoWriter.fourcc(*"FFV1"),
@@ -300,6 +331,14 @@ def compose_history(chunks: Sequence[tuple[Path, "RenderDecision"]],
     try:
         for path, decision in chunks:
             camera = decision.subject_camera
+            closeup = (camera is not None and camera.frame_only and camera.fit_subject
+                       and decision.action in ("SPEED", "KEEP") and decision.speed_ramp is None)
+            group = camera.closeup_group if camera is not None and accumulate and closeup else None
+            if group != local_group:
+                local.reset()
+                local_group = group
+            if group is None:
+                last_closeup = None
             reliable = (camera is not None and camera.canvas_registered and camera.fit_subject
                         and decision.speed_ramp is None)
             source = sources[decision.source_id]
@@ -316,24 +355,37 @@ def compose_history(chunks: Sequence[tuple[Path, "RenderDecision"]],
                     if not ok or decoded.shape[:2] != (height, width):
                         raise MediaError("Cannot decode canvas chunk")
                     frame = np.asarray(decoded, dtype=np.uint8)
-                    if not accumulate and camera is not None:
+                    displayed_current = False
+                    if group is not None and camera is not None:
                         t = decision.source_start_us + (
                             (decision.source_end_us-decision.source_start_us)*index
                             // decision.output_frame_count)
-                        bounds = trim_horizontal_chrome(frame,visible_bounds(
-                            camera,t,sw,sh,width,height))
-                        x,y,r,b = bounds
-                        rgb = camera.background_rgb or (camera.background,)*3
-                        current = np.empty_like(frame)
-                        current[:] = (rgb[2],rgb[1],rgb[0])
-                        current[y:b,x:r] = frame[y:b,x:r]
-                        writer.write(current)
-                        completed += 1
-                        if progress:
-                            progress(completed/max(1,total))
-                        continue
-                    matched = False
-                    if reliable and camera is not None:
+                        current = update_closeup(local, frame, camera, t, sw, sh)
+                        if current is not None:
+                            last_closeup = current
+                        if last_closeup is not None:
+                            frame = last_closeup
+                            displayed_current = True
+                        elif memory.canvas is None:
+                            frame = np.full_like(frame, camera.background)
+                    elif camera is not None and (not accumulate or closeup):
+                        t = decision.source_start_us + (
+                            (decision.source_end_us-decision.source_start_us)*index
+                            // decision.output_frame_count)
+                        point = min(camera.points, key=lambda p: abs(p.time_us-t))
+                        if not closeup or point.visible_region is not None:
+                            bounds = visible_bounds(camera, t, sw, sh, width, height)
+                            x,y,r,b = trim_horizontal_chrome(frame, bounds)
+                            rgb = camera.background_rgb or (camera.background,)*3
+                            current = np.empty_like(frame)
+                            current[:] = (rgb[2], rgb[1], rgb[0])
+                            current[y:b, x:r] = frame[y:b, x:r]
+                            frame = current
+                            displayed_current = True
+                        elif memory.canvas is None:
+                            # Missing local evidence cannot seed the shared canvas.
+                            frame = np.full_like(frame, camera.background)
+                    elif reliable and camera is not None:
                         # camera_filter evaluates points on the rendered output clock.
                         still = decision.action == "HOLD" or decision.output_frame_count == 1
                         t = decision.source_start_us + (round(index*1e6/fps) if still else
@@ -343,11 +395,17 @@ def compose_history(chunks: Sequence[tuple[Path, "RenderDecision"]],
                                                 min(len(times), bisect_left(times, t)+1)),
                                           key=lambda i: abs(times[i]-t))
                         if camera.points[point_index].reference_matched:
-                            matched = True
+                            displayed_current = True
                             rgb = camera.background_rgb or (camera.background,)*3
+                            # The tracking rectangle can include antialiased
+                            # pixels just outside the drawn page. At high zoom
+                            # even one source row can stain the saved margin.
+                            inset = (SETTINGS.registered_source_inset_fraction
+                                     if guard_document_edges else 0)
                             frame = memory.update(frame, visible_bounds(
-                                camera, t, sw, sh, width, height), (rgb[2], rgb[1], rgb[0]))
-                    if not matched:
+                                camera, t, sw, sh, width, height,
+                                source_inset_fraction=inset), (rgb[2], rgb[1], rgb[0]))
+                    if not displayed_current:
                         if memory.canvas is not None:
                             # Lost correspondence is not evidence of a new drawing.
                             # Preserve trusted pixels until matching resumes; never

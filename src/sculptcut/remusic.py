@@ -1,6 +1,5 @@
 """Replace music; rebuild musical stills or motion episodes against their snapshot."""
 
-import os
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -9,6 +8,7 @@ from typing import Literal
 
 from sculptcut.audio import add_music
 from sculptcut.domain import DEFAULT_BEAT_SYNC_MODE, DEFAULT_BEAT_SYNC_STRENGTH, Project
+from sculptcut.export_storage import publish_export
 from sculptcut.media import discover, probe, run_process
 from sculptcut.music_library import soundtrack
 from sculptcut.output_naming import next_variant_path
@@ -60,6 +60,21 @@ def replace_music(
     assert music is not None
     destination = next_variant_path(video.parent, "music-variant", settings.preset)
     rebuild = settings.preset in MUSIC_SHORTS_PRESETS and not trimmed
+    if snapshot_project:
+        snapshot_project = snapshot_project.model_copy(
+            update={
+                "settings": snapshot_project.settings.model_copy(
+                    update={
+                        "music_folder": music_folder,
+                        "music_path": music_path,
+                        "music_seed": seed,
+                        "music_selection_mode": settings.music_selection_mode,
+                        "music_loop": settings.music_loop,
+                        "music_fade_seconds": settings.music_fade_seconds,
+                    }
+                )
+            }
+        )
     if rebuild:
         from sculptcut.planning import plan_project
         from sculptcut.rendering import render
@@ -88,32 +103,15 @@ def replace_music(
                 discover("ffmpeg"), "-v", "error", "-xerror", "-i", str(result),
                 "-f", "null", "-",
             ], cancel)
-            os.rename(result, destination)
+            with publish_export(result, destination, cancel):
+                save_variant(destination, project=snapshot_project, music=music, parent=video,
+                             operation="music")
     save_project(root, project.model_copy(update={"settings": project.settings.model_copy(
         update={
             "music_folder": music_folder, "music_path": music_path, "music_seed": seed,
             "music_selection_mode": settings.music_selection_mode,
         },
     )}))
-    if snapshot_project:
-        snapshot_project = snapshot_project.model_copy(
-            update={
-                "settings": snapshot_project.settings.model_copy(
-                    update={
-                        "music_folder": music_folder,
-                        "music_path": music_path,
-                        "music_seed": seed,
-                        "music_selection_mode": settings.music_selection_mode,
-                        "music_loop": settings.music_loop,
-                        "music_fade_seconds": settings.music_fade_seconds,
-                    }
-                )
-            }
-        )
-    if not rebuild:
-        save_variant(
-            destination, project=snapshot_project, music=music, parent=video, operation="music"
-        )
     if progress:
         progress(1)
     return destination

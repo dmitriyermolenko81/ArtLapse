@@ -92,7 +92,7 @@ def test_full_soundtrack_hover_cuts_while_playing_and_inserts_from_menu(
         assert calls[0] is window
         assert window.status.text().startswith('Трек добавлен в свободный промежуток')
         assert not source.more.isVisible() and not window.manual_music_button.isVisible()
-        assert source.montage_seek.height()+music.height() == 102
+        assert source.montage_seek.height()+music.height() == 92
         inserted = list(music.clips)
         music.undo()
         assert all(c.path == video for c in music.clips)

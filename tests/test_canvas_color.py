@@ -11,7 +11,7 @@ from sculptcut.media import discover, doctor, run_process
 from sculptcut.planning import build_plan
 from sculptcut.project import create_project, save_project
 from sculptcut.rendering import render, verify_output
-from sculptcut.subject_camera import tracking_clip
+from sculptcut.subject_camera import read_still, tracking_clip
 
 
 @pytest.mark.parametrize("matrix,color_range,cover,encoder", [
@@ -33,8 +33,10 @@ def test_canvas_preserves_colour_and_flat_midtones(
     for i, colour in enumerate(colours):
         image[:, i*64:(i+1)*64] = colour
     image[80:] = np.linspace(48, 96, 256).astype(np.uint8)[None, :, None]
-    png = tmp_path / "reference.png"
-    cv2.imwrite(str(png), image)
+    png = tmp_path / "образец.png"
+    ok, encoded = cv2.imencode('.png', image)
+    assert ok
+    png.write_bytes(encoded.tobytes())
     source = tmp_path / "source.mp4"
     run_process([
         discover("ffmpeg"), "-v", "error", "-loop", "1", "-i", str(png),
@@ -75,7 +77,7 @@ def test_canvas_preserves_colour_and_flat_midtones(
         reader = cv2.VideoCapture(str(chunk))
         ok, frame = reader.read()
         reader.release()
-        assert ok and np.array_equal(frame, cv2.imread(str(tmp_path / "chunk.png")))
+        assert ok and np.array_equal(frame, read_still(tmp_path / "chunk.png"))
 
     monkeypatch.setattr(rendering, "record_chunk", record)
     output = render(root, project, plan, tmp_path / "output.mp4", encoder=encoder)
@@ -83,10 +85,10 @@ def test_canvas_preserves_colour_and_flat_midtones(
     assert directories and not directories[0].exists()  # RGB checkpoints must not leak
     run_process([discover("ffmpeg"), "-v", "error", "-ss", "1.3" if cover else "0.5",
                  "-i", str(output), "-frames:v", "1", str(tmp_path / "result.png")])
-    result = cv2.imread(str(tmp_path / "result.png"))
+    result = read_still(tmp_path / "result.png")
     run_process([discover("ffmpeg"), "-v", "error", "-i", str(source),
                  "-frames:v", "1", str(tmp_path / "source.png")])
-    reference = cv2.imread(str(tmp_path / "source.png"))
+    reference = read_still(tmp_path / "source.png")
     tracking = tracking_clip(project.sources[0], 0, 1_000_000, tmp_path / "tracking.mp4",
                              output_frames=10, output_fps=10, rgb=True)
     reader = cv2.VideoCapture(str(tracking))

@@ -23,6 +23,11 @@ def test_merge_imports_all_projects_once_without_changing_old_settings(tmp_path)
     merge_projects(shared, old)
     assert project_paths(shared) == paths[1:]  # no deleted entry resurrection
     assert (tmp_path / "old.ini").read_bytes() == original
+    new = str(tmp_path / "добавлен в старой версии")
+    old.setValue("recent_projects", [new, *reversed(paths)])
+    old.sync()
+    merge_projects(shared, old)
+    assert project_paths(shared) == [*paths[1:], new]
 
 
 def test_neighbouring_releases_are_discovered_without_searching_projects(tmp_path, monkeypatch):

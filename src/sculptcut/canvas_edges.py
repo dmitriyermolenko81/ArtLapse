@@ -31,6 +31,83 @@ class EdgeSettings:
 SETTINGS = EdgeSettings()
 
 
+@dataclass(frozen=True)
+class WorkspaceSettings:
+    neutral_chroma: int = 10
+    chrome_level: int = 56
+    chrome_coverage: float = .70
+    top_range: tuple[float, float] = (.025, .12)
+    bottom_range: tuple[float, float] = (.008, .13)
+    left_range: tuple[float, float] = (.008, .085)
+    right_range: tuple[float, float] = (.002, .085)
+    chromatic_level: int = 14
+    document_chromatic_coverage: float = .12
+    document_line_coverage: float = .22
+    minimum_document_area: float = .08
+    document_gap_pixels: int = 2
+
+
+WORKSPACE = WorkspaceSettings()
+
+
+def _chrome_extent(profile: NDArray[np.float64],
+                   limits: tuple[float, float]) -> int | None:
+    minimum, maximum = (round(len(profile)*fraction) for fraction in limits)
+    hits = np.flatnonzero(profile[:maximum] >= WORKSPACE.chrome_coverage)
+    if not len(hits) or not minimum <= hits[-1]+1 < maximum-1:
+        return None
+    return int(hits[-1]+1)
+
+
+def _document_extent(profile: NDArray[np.float64]) -> tuple[int, int] | None:
+    lines = np.flatnonzero(profile >= WORKSPACE.document_line_coverage)
+    if not len(lines):
+        return None
+    # Transform guides and brush rings can light up a line well outside the
+    # sheet. Use the connected document extent, bridging only codec gaps.
+    breaks = np.flatnonzero(np.diff(lines) > WORKSPACE.document_gap_pixels+1)+1
+    document = max(np.split(lines, breaks), key=len)
+    return int(document[0]), int(document[-1])+1
+
+
+def dark_document_bounds(frame: NDArray[np.uint8]) -> Bounds | None:
+    """Find a coloured document between four neutral bars in the dark workspace."""
+    h, w = frame.shape[:2]
+    blue, green, red = cv2.split(frame)
+    brightest = np.maximum(np.maximum(blue, green), red)
+    darkest = np.minimum(np.minimum(blue, green), red)
+    chroma = brightest-darkest
+    neutral = chroma <= WORKSPACE.neutral_chroma
+    chrome = neutral & (darkest >= WORKSPACE.chrome_level)
+    rows = np.mean(chrome[:, w//8:7*w//8], axis=1)
+    columns = np.mean(chrome[h//5:4*h//5, :], axis=0)
+    top = _chrome_extent(rows, WORKSPACE.top_range)
+    bottom = _chrome_extent(rows[::-1], WORKSPACE.bottom_range)
+    left = _chrome_extent(columns, WORKSPACE.left_range)
+    right = _chrome_extent(columns[::-1], WORKSPACE.right_range)
+    if top is None or bottom is None or left is None or right is None:
+        return None
+    x, y, r, b = left+1, top+1, w-right-1, h-bottom-1
+    workspace = neutral & (brightest <= WORKSPACE.chrome_level)
+    content = ~workspace[y:b, x:r]
+    cols = _document_extent(np.mean(content, axis=0))
+    if cols is None:
+        return None
+    lo, hi = cols
+    lines = _document_extent(np.mean(content[:, lo:hi], axis=1))
+    if lines is None:
+        return None
+    top, bottom = lines
+    if (hi-lo)*(bottom-top) < w*h*WORKSPACE.minimum_document_area:
+        return None
+    x, y, r, b = x+lo, y+top, x+hi, y+bottom
+    if np.mean(chroma[y:b, x:r] >= WORKSPACE.chromatic_level) < (
+        WORKSPACE.document_chromatic_coverage
+    ):
+        return None
+    return x, y, r, b
+
+
 def clear_outer_guides(frame: NDArray[np.uint8]) -> None:
     """Inpaint thin guide rectangles above the figure, never its interior."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.uint8)

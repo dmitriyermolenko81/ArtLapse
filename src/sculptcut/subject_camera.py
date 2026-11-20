@@ -13,6 +13,15 @@ from sculptcut.media import MediaError, discover, run_process
 from sculptcut.roi import pixel_bounds
 
 
+def read_still(path: Path) -> NDArray[np.uint8]:
+    """Let Python open the Unicode filename, then decode the image in memory."""
+    data = np.frombuffer(path.read_bytes(), dtype=np.uint8)
+    image = cv2.imdecode(data, cv2.IMREAD_COLOR) if data.size else None
+    if image is None:
+        raise MediaError(f'Cannot decode still frame: {path.name}')
+    return np.asarray(image, dtype=np.uint8)
+
+
 def still_frame(
     source: SourceMedia, time_us: int, destination: Path,
     cancel: Event | None = None, sample_width: int | None = None,

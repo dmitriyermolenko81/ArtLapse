@@ -46,7 +46,7 @@ def test_compact_viewer_controls_and_lower_version_bar(roll_movie):
         assert abs(window.video_time.geometry().center().y()
                    - window.play_button.geometry().center().y()) <= 1
         assert window.volume_control.height() == 28
-        assert dialog.montage_seek.height() == 62
+        assert dialog.montage_seek.height() == 52
         assert dialog.undo.width() == 28 and not dialog.undo.icon().isNull()
         assert dialog.apply.height() == 34 and dialog.apply.text() == 'Применить правки'
         track = dialog.montage_seek

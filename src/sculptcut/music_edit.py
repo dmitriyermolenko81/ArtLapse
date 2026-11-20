@@ -9,8 +9,8 @@ from threading import Event
 from pydantic import Field, model_validator
 
 from sculptcut.domain import Model, Project
-from sculptcut.export_storage import metadata_path
-from sculptcut.media import Cancelled, discover, probe, run_process
+from sculptcut.export_storage import metadata_path, publish_export
+from sculptcut.media import Cancelled, MediaInfo, discover, probe, run_process
 from sculptcut.music_library import audio_duration, music_signature
 from sculptcut.output_naming import next_variant_path
 from sculptcut.planning import RenderPlan
@@ -40,6 +40,13 @@ class MusicClip(Model):
             if self.envelope_end_us is None:
                 object.__setattr__(self, 'envelope_end_us', self.end_us)
         return self
+
+
+def embedded_music(video: Path, info: MediaInfo) -> list[MusicClip]:
+    if not info.audio_streams or not info.duration_us:
+        return []
+    end = min(info.duration_us, round(audio_duration(video, None) * 1_000_000))
+    return [MusicClip(path=video, start_us=0, end_us=end, at_us=0)] if end > 0 else []
 
 
 def music_gain(clip: MusicClip, source_us: int) -> float:
@@ -112,8 +119,9 @@ def draft_path(root: Path, video: Path) -> Path:
     return root/'music-edit-drafts'/f'{key}.json'
 
 
-def save_draft(root: Path, video: Path, clips: list[MusicClip]) -> None:
-    stat = video.stat()
+def save_draft(root: Path, video: Path, clips: list[MusicClip],
+               *, ready: Path | None = None) -> None:
+    stat = (ready or video).stat()
     atomic_write(draft_path(root, video), json.dumps({'version': 1,
         'video': str(video.resolve()), 'size': stat.st_size, 'mtime_ns': stat.st_mtime_ns,
         'clips': [c.model_dump(mode='json') for c in clips]}, ensure_ascii=False))
@@ -149,10 +157,15 @@ def parse_music_clips(data: object) -> list[MusicClip]:
 
 def assemble_music(root: Path, clips: list[MusicClip], duration_us: int,
                    cancel: Event) -> Path:
+    if cancel.is_set():
+        raise Cancelled('Music edit cancelled')
     if clips:
         validate_clips(clips, duration_us)
+    lengths: dict[Path, int] = {}
     for clip in clips:
-        if clip.end_us > round(audio_duration(clip.path, cancel)*1e6)+1000:
+        if clip.path not in lengths:
+            lengths[clip.path] = round(audio_duration(clip.path, cancel)*1e6)
+        if clip.end_us > lengths[clip.path]+1000:
             raise ValueError(f'Фрагмент выходит за конец трека: {clip.path.name}')
     folder = root/'music'/'manual'
     folder.mkdir(parents=True, exist_ok=True)
@@ -209,7 +222,8 @@ def mux_music(video: Path, music: Path, output: Path, duration_us: int, cancel: 
 
 def apply_music_edit(root: Path, video: Path, clips: list[MusicClip], cancel: Event,
                      *, destination: Path | None = None, parent: Path | None = None,
-                     preview: bool = False, operation: str = 'music') -> Path:
+                     preview: bool = False, operation: str = 'music',
+                     draft_clips: list[MusicClip] | None = None) -> Path:
     info = probe(video)
     if not info.duration_us:
         raise ValueError('Не удалось определить длительность видео.')
@@ -221,14 +235,6 @@ def apply_music_edit(root: Path, video: Path, clips: list[MusicClip], cancel: Ev
     if output.exists():
         raise ValueError('Output must be a new path')
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='music-version-', dir=video.parent) as scratch:
-        result = Path(scratch)/'result.mp4'
-        mux_music(video, music, result, info.duration_us, cancel)
-        run_process([discover('ffmpeg'), '-v', 'error', '-xerror', '-i', str(result),
-                     '-f', 'null', '-'], cancel)
-        if cancel.is_set():
-            raise Cancelled('Music edit cancelled')
-        os.rename(result, output)
     if project:
         project = project.model_copy(update={'settings': project.settings.model_copy(update={
             'music_path': music, 'music_folder': None, 'music_loop': False,
@@ -239,14 +245,21 @@ def apply_music_edit(root: Path, video: Path, clips: list[MusicClip], cancel: Ev
             k: v for k, v in plan.settings.items() if k != 'request_key'} | {
                 'draft': preview, 'music_fingerprint': music_signature(project.settings)
                 if project else plan.settings.get('music_fingerprint', '')}})
-    save_variant(output, project=project, plan=plan, music=music, parent=parent or video,
-        operation=operation, history=cut_history(video),
-        bookend_cuts=state.get('bookend_cuts_us'),
-        episode_base_plan=RenderPlan.model_validate(state['episode_base_plan'])
-            if state.get('episode_base_plan') else None,
-        episode_catalogue=state.get('episode_catalogue'))
-    save_draft(root, output, clips)
-    # Descriptive edit data also travels with the version alongside its frozen soundtrack.
-    atomic_write(metadata_path(output, '.music-edit.json'), json.dumps(
-        [c.model_dump(mode='json') for c in clips], ensure_ascii=False))
+    kept_clips = clips if draft_clips is None else draft_clips
+    lane = metadata_path(output, '.music-edit.json')
+    with tempfile.TemporaryDirectory(prefix='music-version-', dir=output.parent) as scratch:
+        result = Path(scratch)/'result.mp4'
+        mux_music(video, music, result, info.duration_us, cancel)
+        run_process([discover('ffmpeg'), '-v', 'error', '-xerror', '-i', str(result),
+                     '-f', 'null', '-'], cancel)
+        with publish_export(result, output, cancel, extra_files=(draft_path(root, output), lane)):
+            save_variant(output, project=project, plan=plan, music=music, parent=parent or video,
+                operation=operation, history=cut_history(video),
+                bookend_cuts=state.get('bookend_cuts_us'),
+                episode_base_plan=RenderPlan.model_validate(state['episode_base_plan'])
+                    if state.get('episode_base_plan') else None,
+                episode_catalogue=state.get('episode_catalogue'))
+            save_draft(root, output, kept_clips, ready=result)
+            atomic_write(lane, json.dumps(
+                [c.model_dump(mode='json') for c in kept_clips], ensure_ascii=False))
     return output

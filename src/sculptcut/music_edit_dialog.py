@@ -46,6 +46,7 @@ from sculptcut.music_edit import (
     MusicClip,
     apply_music_edit,
     assemble_music,
+    embedded_music,
     load_draft,
     music_edit_locked,
     music_gain,
@@ -526,9 +527,8 @@ class MusicEditDialog(QDialog):
             info.fps_num > 0 and info.fps_den > 0) else Fraction(1_000_000, 30)
         if not self.duration:
             raise ValueError('Не удалось определить длительность видео.')
-        self.clips = ([MusicClip(path=video, start_us=0, end_us=self.duration, at_us=0)]
-            if self.locked and info.audio_streams
-            else [] if self.locked else load_draft(root, video))
+        self.media_info = info
+        self.clips = embedded_music(video, info) if self.locked else load_draft(root, video)
         self.undo_stack: list[list[MusicClip]] = []
         self.redo_stack: list[list[MusicClip]] = []
         self.worker: MusicJob | None = None

@@ -9,6 +9,7 @@ from sculptcut.photoshop import reframe_photoshop
 from sculptcut.planning import build_plan
 from sculptcut.project import create_project, save_project
 from sculptcut.rendering import render, verify_output
+from sculptcut.subject_camera import read_still
 
 
 def test_page_geometry_suppresses_pixel_noise_across_episodes_but_keeps_pan_zoom():
@@ -134,7 +135,7 @@ def test_illustration_fits_one_page_despite_source_pan_zoom_and_weak_subject(
         image = tmp_path / f"frame-{index}.png"
         run_process([discover("ffmpeg"), "-v", "error", "-ss", str(seconds),
                      "-i", str(output), "-frames:v", "1", str(image)])
-        frame = cv2.imread(str(image))
+        frame = read_still(image)
         if not keep_model and index == 0:
             assert np.max(np.abs(frame[1230,810].astype(int)-160)) < 10
         dark = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) < 80

@@ -1,9 +1,36 @@
 import cv2
 import numpy as np
 
-from sculptcut.canvas_edges import trim_horizontal_chrome
+from sculptcut.canvas_edges import dark_document_bounds, trim_horizontal_chrome
 from sculptcut.canvas_history import CanvasMemory
 from sculptcut.photoshop import drawing_and_canvas_box
+
+
+def test_dark_photoshop_workspace_excludes_bars_and_margins():
+    frame = np.full((540, 960, 3), 38, np.uint8)
+    frame[:34] = 65
+    frame[516:522] = 73
+    frame[522:] = 2
+    frame[34:516, :15] = 81
+    frame[34:516, 954:] = 73
+    frame[34:460, 224:726] = (68, 50, 39)
+    frame[350:460, 224:726] = (110, 87, 72)
+    frame[105:405, 404:555] = (21, 105, 213)
+    assert dark_document_bounds(frame) == (224, 35, 726, 460)
+
+    frame[485:487, 175:805] = (174, 157, 126)
+    assert dark_document_bounds(frame) == (224, 35, 726, 460)
+
+    # A far zoom-out must evaluate colour on the page, even if workspace
+    # takes up most of the pixels inside the application window.
+    frame[34:516, 15:954] = 38
+    frame[180:431, 376:544] = (68, 50, 39)
+    assert dark_document_bounds(frame) == (376, 180, 544, 431)
+
+    # A zoomed-in page can extend all the way to the toolbars.
+    frame[34:516, 15:954] = (68, 50, 39)
+    assert dark_document_bounds(frame) == (16, 35, 953, 515)
+    assert dark_document_bounds(frame[34:516, 15:954]) is None
 
 
 def test_window_bands_are_excluded_before_the_canvas_remembers_them():

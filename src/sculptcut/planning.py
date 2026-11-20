@@ -371,13 +371,19 @@ def plan_project(
         from dataclasses import asdict
 
         from sculptcut.canvas_edges import SETTINGS as EDGES
+        from sculptcut.canvas_edges import WORKSPACE
+        from sculptcut.canvas_history import enabled as keep_whole_canvas
         from sculptcut.drawing_page import SETTINGS as PAGE
         from sculptcut.drawing_reference import SETTINGS as REFERENCE
         from sculptcut.photoshop import SETTINGS as DRAWING
+        from sculptcut.photoshop_closeup import SETTINGS as CLOSEUPS
 
         project_identity['photoshop_camera'] = {
             'version': 366, **asdict(DRAWING), 'reference': asdict(REFERENCE),
             'canvas_edges': asdict(EDGES), 'page': asdict(PAGE)}
+        if keep_whole_canvas(project.settings):
+            project_identity['photoshop_workspace'] = asdict(WORKSPACE)
+            project_identity['photoshop_closeups'] = asdict(CLOSEUPS)
     if project.settings.preset in ("shorts", "music_shorts") and not uses_square(project.settings):
         from dataclasses import asdict
 

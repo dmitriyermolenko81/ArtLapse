@@ -11,6 +11,7 @@ from sculptcut.media import probe
 from sculptcut.music_edit import (
     MusicClip,
     apply_music_edit,
+    embedded_music,
     music_edit_locked,
     parse_music_clips,
 )
@@ -27,8 +28,7 @@ def saved_music_clips(video: Path) -> list[MusicClip] | None:
         info = probe(video)
         if not info.duration_us:
             raise ValueError('Не удалось определить длительность видео.')
-        return [MusicClip(path=video, start_us=0, end_us=info.duration_us, at_us=0)] if (
-            info.audio_streams) else []
+        return embedded_music(video, info)
     path = metadata_path(video, '.music-edit.json')
     return (parse_music_clips(json.loads(path.read_text(encoding='utf-8')))
             if path.is_file() else None)
@@ -56,16 +56,8 @@ def render_tracks(root: Path, edit: CombinedEdit, destination: Path, cancel: Eve
         if not duration:
             raise ValueError('Не удалось определить длительность видео.')
         result = apply_music_edit(root, video, audible_clips(clips, duration), cancel,
-            destination=destination, parent=edit.parent, preview=preview,
+            destination=destination, parent=edit.parent, preview=preview, draft_clips=clips,
             operation=('source_selection' if preview else 'combined_edit')
                 if video_changed else 'music')
-        # Preserve the complete absolute-time music draft if the video was shortened.
-        from sculptcut.music_edit import save_draft
-
-        save_draft(root, result, clips)
-        from sculptcut.project import atomic_write
-
-        atomic_write(metadata_path(result, '.music-edit.json'), json.dumps(
-            [c.model_dump(mode='json') for c in clips], ensure_ascii=False))
         progress(1)
         return result

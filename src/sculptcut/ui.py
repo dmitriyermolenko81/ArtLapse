@@ -120,6 +120,7 @@ from sculptcut.project import (
     resolve_snapshot_sources,
     save_project,
 )
+from sculptcut.project_library import store_projects
 from sculptcut.proxy import make_proxies, proxy_path
 from sculptcut.rendering import render
 from sculptcut.runtime_paths import data_directory
@@ -2262,11 +2263,7 @@ class MainWindow(QMainWindow):
             for path in self.recent_project_paths()
             if str(path).casefold() != str(current).casefold()
         )
-        self.project_library.sync()
-        self.project_library.setValue("recent_projects", [str(path) for path in paths])
-        self.project_library.sync()
-        self.recent_settings.setValue("recent_projects", [str(path) for path in paths])
-        self.recent_settings.sync()
+        store_projects(self.project_library, self.recent_settings, [str(path) for path in paths])
 
     def show_recent_projects(self) -> None:
         menu = QMenu(self)
@@ -2678,9 +2675,7 @@ class MainWindow(QMainWindow):
             if result["project_removed"]:
                 paths = [str(path) for path in self.recent_project_paths()
                          if path.absolute() != root]
-                self.recent_settings.setValue("recent_projects", paths)
-                self.project_library.setValue("recent_projects", paths)
-                self.project_library.sync()
+                store_projects(self.project_library, self.recent_settings, paths)
                 self.folder.clear()
                 self.root = None
                 self.set_sources([])

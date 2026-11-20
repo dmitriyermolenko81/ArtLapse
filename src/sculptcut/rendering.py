@@ -3,7 +3,6 @@
 import json
 import logging
 import math
-import os
 import tempfile
 from collections.abc import Callable
 from contextlib import nullcontext
@@ -13,7 +12,7 @@ from threading import Event
 from sculptcut.audio import add_music, validate_music
 from sculptcut.bookends import bookend_filter, final_frames
 from sculptcut.domain import Project, Roi
-from sculptcut.export_storage import metadata_path
+from sculptcut.export_storage import metadata_path, publish_export
 from sculptcut.intro import active_intro_image, output_frame_count, prepend_intro
 from sculptcut.jobs import finish_job, record_chunk, render_job, reusable_chunk
 from sculptcut.media import Cancelled, MediaError, discover, doctor, parse_probe, probe, run_process
@@ -304,16 +303,24 @@ def render(
                and d.action not in ("HOLD", "MONTAGE") for d in plan.decisions):
             make_proxies(root, project, cancel)
         plan = plan.model_copy(update={"settings": plan.settings | {"draft": 1}})
-        result = render_preview(root, project, plan, destination, cancel, progress)
-        music = soundtrack(root, project.settings, output_frame_count(
-            project.settings, plan.output_fps, plan.actual_frame_count) / plan.output_fps, cancel)
-        save_variant(result, project=variant_project or project, plan=plan, music=music,
-            parent=variant_parent, operation=variant_operation, cuts=variant_cuts,
-            episode_base_plan=variant_episode_base,
-            episode_catalogue=(None if variant_parent and
-                read_variant(variant_parent).get("episode_catalogue") else
-                catalogue_snapshot(root, variant_project or project, plan)))
-        return result
+        destination = destination.resolve()
+        if destination.suffix.lower() != ".mp4" or destination.exists():
+            raise ValueError("Output must be a new .mp4 path")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="preview-publish-", dir=destination.parent) as tmp:
+            result = render_preview(
+                root, project, plan, Path(tmp) / "preview.mp4", cancel, progress)
+            frames = output_frame_count(project.settings, plan.output_fps, plan.actual_frame_count)
+            music = soundtrack(root, project.settings, frames / plan.output_fps, cancel)
+            with publish_export(result, destination, cancel):
+                save_variant(destination, project=variant_project or project, plan=plan,
+                    music=music,
+                    parent=variant_parent, operation=variant_operation, cuts=variant_cuts,
+                    episode_base_plan=variant_episode_base,
+                    episode_catalogue=(None if variant_parent and
+                        read_variant(variant_parent).get("episode_catalogue") else
+                        catalogue_snapshot(root, variant_project or project, plan)))
+        return destination
     if preview:
         plan = plan.model_copy(update={"settings": plan.settings | {
             "draft": 1, "preview_quality": "original"}})
@@ -325,11 +332,19 @@ def render(
     from sculptcut.canvas_history import enabled as canvas_history_enabled
 
     if canvas_history_enabled(project.settings) or plan.settings.get('photoshop_frame_only'):
+        continuity = "hold-on-unmatched-357"
+        if plan.settings.get('photoshop_frame_only'):
+            continuity = "current-frame-only-366"
+        elif any(d.output_frame_count and d.subject_camera
+                 and d.subject_camera.closeup_group is not None for d in plan.decisions):
+            continuity = "registered-closeup-377"
+        elif any(d.output_frame_count and d.subject_camera and d.subject_camera.frame_only
+                 for d in plan.decisions):
+            continuity = "closeup-on-unmatched-376"
         plan = plan.model_copy(update={"settings": plan.settings | {
             "canvas_color_pipeline": "rgb-lossless-356",
             "canvas_delivery_crf": CANVAS_DELIVERY_CRF,
-            "canvas_continuity": ('current-frame-only-366'
-                if plan.settings.get('photoshop_frame_only') else 'hold-on-unmatched-357'),
+            "canvas_continuity": continuity,
         }})
     selected = "h264_nvenc" if encoder != "libx264" and doctor().get("h264_nvenc") else "libx264"
     if encoder_status:
@@ -599,6 +614,7 @@ def _render(
                 page_alignment=str(plan.settings.get('photoshop_camera', '')).startswith(
                     'enclosed-page-'),
                 accumulate=not bool(plan.settings.get('photoshop_frame_only')),
+                guard_document_edges=plan.settings.get('photoshop_camera')=='fixed-reference-352',
             )
             combined = assembled
         guarded_frames = normalize_timing(
@@ -673,33 +689,35 @@ def _render(
         validate_plan(project, plan)
         if destination.exists():
             raise ValueError("Output appeared during render; refusing overwrite")
-        os.rename(combined, destination)
         from sculptcut.episode_roll import catalogue_snapshot
         from sculptcut.variants import read_variant, save_variant
 
-        save_variant(
-            destination,
-            project=variant_project or project,
-            plan=plan,
-            music=music,
-            parent=variant_parent,
-            cuts=variant_cuts,
-            operation=variant_operation,
-            episode_base_plan=variant_episode_base,
-            episode_catalogue=(None if variant_parent and
-                               read_variant(variant_parent).get("episode_catalogue") else
-                               catalogue_snapshot(root, variant_project or project, plan)),
-        )
-        if guarded_frames:
-            atomic_write(
-                metadata_path(destination, ".guard.json"),
-                json.dumps(
-                    {
-                        "policy": "replace_screen_flashes_with_clean_neighbours",
-                        "frames": guarded_frames,
-                    }
-                ),
+        guard = metadata_path(destination, ".guard.json")
+        with publish_export(combined, destination, cancel,
+                            extra_files=(guard,) if guarded_frames else ()):
+            save_variant(
+                destination,
+                project=variant_project or project,
+                plan=plan,
+                music=music,
+                parent=variant_parent,
+                cuts=variant_cuts,
+                operation=variant_operation,
+                episode_base_plan=variant_episode_base,
+                episode_catalogue=(None if variant_parent and
+                                   read_variant(variant_parent).get("episode_catalogue") else
+                                   catalogue_snapshot(root, variant_project or project, plan)),
             )
+            if guarded_frames:
+                atomic_write(
+                    guard,
+                    json.dumps(
+                        {
+                            "policy": "replace_screen_flashes_with_clean_neighbours",
+                            "frames": guarded_frames,
+                        }
+                    ),
+                )
         finish_job(temporary)
         if progress:
             progress(1)

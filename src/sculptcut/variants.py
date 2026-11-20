@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from sculptcut.domain import Project
-from sculptcut.export_storage import metadata_directory, metadata_path, music_relative_path
+from sculptcut.export_storage import (
+    metadata_directory,
+    metadata_path,
+    music_relative_path,
+    variant_assets,
+)
 from sculptcut.planning import RenderPlan
 from sculptcut.project import atomic_write
 
@@ -124,7 +129,7 @@ def save_variant(
     inherited = read_variant(parent) if parent else {}
     soundtrack = inherited.get("music")
     if music:
-        assets = metadata_directory(video) / ".variant-assets" / video.stem
+        assets = variant_assets(video)
         assets.mkdir(parents=True, exist_ok=True)
         saved_music = assets / ("soundtrack" + music.suffix)
         shutil.copy2(music, saved_music)

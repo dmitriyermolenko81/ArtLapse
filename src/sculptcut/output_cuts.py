@@ -1,6 +1,5 @@
 """Remove ranges from an existing export without touching its source file."""
 
-import os
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -184,11 +183,11 @@ def cut_output(
                 raise Cancelled("Сохранение отменено")
             destination = source.with_name(f"{source.stem}-edit-{number:03}.mp4")
             try:
-                # Same-volume hard link publishes atomically and never overwrites a file.
-                os.link(ready, destination)
+                from sculptcut.export_storage import publish_export
                 from sculptcut.variants import save_variant
 
-                save_variant(destination, parent=source, cuts=cuts, operation="cut")
+                with publish_export(ready, destination, cancel):
+                    save_variant(destination, parent=source, cuts=cuts, operation="cut")
                 progress(1)
                 return destination
             except FileExistsError:

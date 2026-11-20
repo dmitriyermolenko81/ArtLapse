@@ -1,6 +1,5 @@
 """Rebuild a finished variant with another intro, reusing its edit plan."""
 
-import os
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -157,11 +156,13 @@ def replace_intro(
                 from sculptcut.media import Cancelled
 
                 raise Cancelled("Обновление заставки отменено")
-            os.link(result, destination)
-            save_variant(
-                destination, project=snapshot_project, plan=plan, music=saved_music,
-                parent=video, operation="intro", history=history,
-            )
+            from sculptcut.export_storage import publish_export
+
+            with publish_export(result, destination, cancel):
+                save_variant(
+                    destination, project=snapshot_project, plan=plan, music=saved_music,
+                    parent=video, operation="intro", history=history,
+                )
         result = destination
     else:
         render_progress = (

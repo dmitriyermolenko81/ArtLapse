@@ -1,7 +1,6 @@
 """Compose output trims and source-time episode edits against the selected export."""
 
 import json
-import os
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -464,9 +463,11 @@ def render_combined_edit(
         soundtrack = saved_soundtrack(base)
         if cancel.is_set():
             raise Cancelled("Сохранение отменено")
-        os.link(result, destination)
-        save_variant(destination, project=edit.snapshot, plan=edit.plan,
-                     parent=edit.parent, operation=operation, cuts=edit.cuts,
-                     music=soundtrack[0] if soundtrack else None, bookend_cuts=bookends,
-                     episode_base_plan=edit.base_plan)
+        from sculptcut.export_storage import publish_export
+
+        with publish_export(result, destination, cancel):
+            save_variant(destination, project=edit.snapshot, plan=edit.plan,
+                         parent=edit.parent, operation=operation, cuts=edit.cuts,
+                         music=soundtrack[0] if soundtrack else None, bookend_cuts=bookends,
+                         episode_base_plan=edit.base_plan)
     return destination
