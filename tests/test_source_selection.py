@@ -218,6 +218,8 @@ def test_gui_drag_partial_gap_preview_audio_undo_and_cancel_leave_project_untouc
 def test_main_window_preview_apply_then_original_export_keeps_manual_bounds(
     roll_movie, monkeypatch
 ):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication
     from test_episode_panel import wait_until
 
@@ -247,14 +249,58 @@ def test_main_window_preview_apply_then_original_export_keeps_manual_bounds(
         assert window.viewer_scroll.widget() is original_viewer
         assert not dialog.picture.isVisible() and not dialog.montage.isVisible()
         assert window.video.isVisible()
+        assert not dialog.drop.isVisible()
+        assert not dialog.undo.isVisible()
+        assert dialog.delete_keep.isVisible() and dialog.delete_keep.isChecked()
+        assert dialog.delete_shorten.isVisible()
+        for mode in (dialog.delete_keep, dialog.delete_shorten):
+            assert not mode.text() and not mode.icon().isNull()
+            assert mode.accessibleName() and "Delete" in mode.toolTip()
+        before = dialog.session.plan
+        scene = next(d for d in before.decisions
+                     if d.output_frame_count and d.action in ("KEEP", "SPEED"))
+        dialog.sources.setCurrentIndex(dialog.sources.findData(scene.source_id))
+        dialog.select_range(scene.source_start_us, scene.source_end_us)
+        dialog.delete_shorten.click()
+        assert dialog.session.plan == before
+        assert window.recent_settings.value("shorten_on_delete", False, type=bool)
+        QTest.keyClick(dialog.montage_seek, Qt.Key.Key_Delete)
+        assert dialog.session.plan.actual_frame_count == (
+            before.actual_frame_count - scene.output_frame_count)
+        assert not dialog.session.keep_duration
+        shortened = dialog.session.plan
+        next_scene = next(d for d in shortened.decisions
+                          if d.output_frame_count and d.action in ("KEEP", "SPEED"))
+        dialog.select_range(next_scene.source_start_us, next_scene.source_end_us)
+        dialog.delete_keep.click()
+        assert dialog.session.plan == shortened
+        assert not window.recent_settings.value("shorten_on_delete", True, type=bool)
+        QTest.keyClick(dialog.montage_seek, Qt.Key.Key_Delete)
+        assert "недостаточно" in dialog.message.text()
+        QTest.keyClick(dialog.montage_seek, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+        assert dialog.session.plan == shortened
+        dialog.select_range(next_scene.source_start_us,
+                            (next_scene.source_start_us + next_scene.source_end_us) // 2)
+        QTest.keyClick(dialog.montage_seek, Qt.Key.Key_Delete)
+        assert dialog.session.keep_duration
+        assert output_frame_count(project.settings, 30, dialog.session.plan.actual_frame_count) == (
+            round(project.settings.target_seconds * 30)
+        )
+        QTest.keyClick(dialog.montage_seek, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+        assert dialog.session.plan == shortened
+        QTest.keyClick(dialog.montage_seek, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+        assert dialog.session.plan == before
+
         dialog.select_range(4_000_000, 5_500_000)
         dialog.speed.setValue(2)
         dialog.keep.click()
+        dialog.delete_shorten.click()
         dialog.apply.click()
         wait_until(app, lambda: window.job is None, 25)
         assert not errors, errors
         wait_until(app, lambda: window.selection_dialog is not None
                    and not window.selection_dialog.loading)
+        assert window.selection_dialog.delete_shorten.isChecked()
         assert window.viewer_scroll.widget() is original_viewer
         previews = list((root / "previews").glob("*selection*.mp4"))
         assert len(previews) == 1

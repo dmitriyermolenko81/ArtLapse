@@ -45,7 +45,7 @@ def output_ranges(project: Project, plan: RenderPlan, leading: list[tuple[int, i
 
 def timeline_start(project: Project, plan: RenderPlan, leading: list[tuple[int, int]]) -> int:
     head = body_start_frame(project.settings, plan.output_fps, plan.actual_frame_count)
-    if plan.settings.get('selection_duration_policy') == 'fixed':
+    if plan.settings.get('selection_duration_policy') in ('fixed', 'shorten'):
         cuts = [tuple(p) for p in json.loads(str(plan.settings.get(
             'selection_head', json.dumps(leading))))]
         head -= removed_frames(cuts, head)
@@ -55,7 +55,7 @@ def timeline_start(project: Project, plan: RenderPlan, leading: list[tuple[int, 
 def timeline_frames(project: Project, plan: RenderPlan, leading: list[tuple[int, int]],
                     trailing: list[tuple[int, int]]) -> int:
     return (selection_frames(project, plan, leading, trailing)
-            if plan.settings.get('selection_duration_policy') == 'fixed' else
+            if plan.settings.get('selection_duration_policy') in ('fixed', 'shorten') else
             output_frame_count(project.settings, plan.output_fps, plan.actual_frame_count))
 
 

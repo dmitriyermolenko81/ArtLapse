@@ -9,7 +9,7 @@ from typing import Literal
 from sculptcut.audio import add_music
 from sculptcut.domain import DEFAULT_BEAT_SYNC_MODE, DEFAULT_BEAT_SYNC_STRENGTH, Project
 from sculptcut.export_storage import publish_export
-from sculptcut.media import discover, probe, run_process
+from sculptcut.media import probe
 from sculptcut.music_library import soundtrack
 from sculptcut.output_naming import next_variant_path
 from sculptcut.project import load_project, resolve_snapshot_sources, save_project
@@ -99,10 +99,9 @@ def replace_music(
                 or abs(actual.duration_us - info.duration_us) > 100000
             ):
                 raise ValueError("Music replacement duration mismatch")
-            run_process([
-                discover("ffmpeg"), "-v", "error", "-xerror", "-i", str(result),
-                "-f", "null", "-",
-            ], cancel)
+            from sculptcut.remux_check import verify_remux
+
+            verify_remux(video, result, cancel)
             with publish_export(result, destination, cancel):
                 save_variant(destination, project=snapshot_project, music=music, parent=video,
                              operation="music")

@@ -92,7 +92,7 @@ def test_render_preview_music_intro_snapshot_and_plan_invalidation(
     verify_output(preview, expected, 30, expected_audio=True)
     encoders = [record.getMessage() for record in caplog.records
                 if record.getMessage().startswith("Final video encoder:")]
-    assert encoders == ["Final video encoder: libx264"] * 2
+    assert encoders == ["Final video encoder: libx264"]  # Preview reuses the verified body.
     for video in (output, preview):
         capture = cv2.VideoCapture(str(video))
         try:
@@ -333,7 +333,7 @@ def test_gui_assign_cancel_save_restore_and_session(
     from time import monotonic, sleep
 
     from PySide6.QtCore import QCoreApplication, QEvent, QTimer
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QMessageBox
     from test_intro import make_image
 
     from sculptcut.presentation_dialog import PresentationDialog
@@ -441,7 +441,16 @@ def test_gui_assign_cancel_save_restore_and_session(
         QTimer.singleShot(20, lambda: configure(True))
         window.presentation_button.click()
         window.sources.setCurrentRow(1)
+        def remove_from_list_only() -> None:
+            if isinstance(dialog := app.activeModalWidget(), QMessageBox):
+                dialog.reject()
+
+        timer = QTimer(window)
+        timer.setSingleShot(True)
+        timer.timeout.connect(remove_from_list_only)
+        timer.start(20)
         window.remove_sources()
+        timer.stop()
         assert window.presentation_video is None
         assert window.listed_source_paths() == [body.resolve()]
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

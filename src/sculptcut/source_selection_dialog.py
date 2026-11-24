@@ -15,9 +15,11 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QCloseEvent, QIcon, QImage, QPixmap, QResizeEvent, QValidator
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QComboBox,
     QDialog,
     QDoubleSpinBox,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -55,7 +57,7 @@ from sculptcut.montage_playback import (
 )
 from sculptcut.montage_timeline import MontageTimeline
 from sculptcut.music_edit import LOCKED_MUSIC_REASON
-from sculptcut.output_cuts import retained_ranges, saved_soundtrack
+from sculptcut.output_cuts import saved_soundtrack
 from sculptcut.planning import RenderPlan
 from sculptcut.playback_volume import PlaybackVolume, VolumeControl
 from sculptcut.project import load_project
@@ -71,11 +73,11 @@ from sculptcut.selection_history import (
     scoped_edits,
 )
 from sculptcut.selection_timeline import SelectionTimeline
-from sculptcut.shorts_refill import cuts_on_plan_clock
+from sculptcut.shorts_refill import saved_frame_ranges
 from sculptcut.simple_timeline import EditMarker, SimpleTimeline
 from sculptcut.source_selection import SourceSelection
 from sculptcut.time_format import format_time
-from sculptcut.timewarp import output_before, source_time
+from sculptcut.timewarp import output_before, output_fraction, source_time
 from sculptcut.ui_icons import ui_icon
 from sculptcut.ui_theme import apply_dialog_theme
 from sculptcut.variants import read_variant
@@ -136,10 +138,10 @@ class SelectionLoader(QThread):
                 from sculptcut.selection_draft import restore_draft
 
                 try:
-                    restore_draft(self.root, self.video, session)
+                    restore_draft(self.root, self.video, session, pending_cuts=bool(self.cuts))
                 except (OSError, ValueError, KeyError, TypeError) as exc:
                     session.restore_note = str(exc)
-                if (self.fixed_duration and manual_edits(
+                if (session.keep_duration and manual_edits(
                         session.project, session.reference, session.plan)
                         and selection_frames(session.project, session.plan,
                             session.original.leading, session.original.trailing)
@@ -160,6 +162,7 @@ class SourceSelectionDialog(QDialog):
     apply_requested = Signal()
     cursor_changed = Signal(int)
     plan_changed = Signal()
+    delete_mode_changed = Signal(bool)
 
     def __init__(
         self,
@@ -173,10 +176,12 @@ class SourceSelectionDialog(QDialog):
         compact: bool = False,
         modern: bool = False,
         restore_navigation: bool = True,
+        shorten_on_delete: bool = False,
     ) -> None:
         super().__init__(parent)
         self.compact = compact
         self.modern = compact and modern
+        self.shorten_on_delete = shorten_on_delete
         self.restore_navigation = restore_navigation
         apply_dialog_theme(self)
         self.setWindowTitle(tr("Подрезка ролика"))
@@ -244,13 +249,8 @@ class SourceSelectionDialog(QDialog):
         self.saved_settings_compatible = session.project.settings == saved_settings
         # Only cuts already baked into this MP4 affect its pixel clock. Pending
         # edits change the current plan, not the saved video's frame positions.
-        baked = cuts_on_plan_clock(self.video, Project.model_validate(saved["project"]),
-                                   self.saved_plan, [])
-        fps = self.saved_plan.output_fps
-        total = output_frame_count(saved_settings, fps, self.saved_plan.actual_frame_count)
-        frame_cuts = [(max(0, min(total, a*fps//1_000_000)),
-                       max(0, min(total, (b*fps+999_999)//1_000_000))) for a, b in baked]
-        self.saved_frame_ranges = retained_ranges(total, [(a, b) for a, b in frame_cuts if a < b])
+        self.saved_frame_ranges = saved_frame_ranges(
+            self.video, Project.model_validate(saved["project"]), self.saved_plan)
         self.saved_segments_compatible = (
             not session.original.cuts and not session.original.leading
             and not session.original.trailing
@@ -347,7 +347,7 @@ class SourceSelectionDialog(QDialog):
             self.montage_seek.revise_edit.connect(self.edit_marked)
             self.montage_seek.edge_commit.connect(self.commit_edge)
             self.montage_seek.movie_commit.connect(self.trim_movie)
-            self.montage_seek.remove_scene.connect(lambda: self.change("drop"))
+            self.montage_seek.remove_scene.connect(self.remove_episode)
             self.montage_seek.split_scene.connect(self.split_scene)
             self.montage_seek.play_requested.connect(self.play_montage)
             self.montage_seek.undo_requested.connect(lambda: self.history(False))
@@ -429,7 +429,7 @@ class SourceSelectionDialog(QDialog):
         self.keep.setProperty("actionRole", "primary")
         self.drop = QPushButton(tr("Убрать из ролика"))
         self.keep.clicked.connect(lambda: self.change(self.primary_action))
-        self.drop.clicked.connect(lambda: self.change("drop"))
+        self.drop.clicked.connect(self.remove_episode)
         actions.addWidget(self.keep)
         actions.addWidget(self.drop)
         actions.addStretch(1)
@@ -582,6 +582,11 @@ class SourceSelectionDialog(QDialog):
             self.apply.setObjectName('primary')
             self.apply.setStyleSheet('')
             self.apply.setFixedHeight(34)
+            self.undo.hide()
+            self.delete_modes = self.make_delete_modes()
+            actions.removeWidget(self.drop)
+            actions.insertWidget(actions.indexOf(self.apply), self.delete_modes)
+            self.delete_modes.show()
             self.more.setCheckable(False)
             self.more.setText('•••')
             self.more.setFixedSize(38, 30)
@@ -591,8 +596,6 @@ class SourceSelectionDialog(QDialog):
             self.fragment_menu = QMenu(self.more)
             self.fragment_menu.addAction(tr('Точные параметры'), self.toggle_details)
             self.fragment_menu.addAction(tr('Разделить здесь (Q)'), self.split_scene)
-            self.fragment_menu.addAction(
-                tr('Убрать из ролика (Delete)'), lambda: self.change('drop'))
             self.fragment_menu.addSeparator()
             self.fragment_redo = self.fragment_menu.addAction(
                 tr('Повторить правку (Ctrl+Y)'), lambda: self.history(True))
@@ -653,6 +656,54 @@ class SourceSelectionDialog(QDialog):
         self.details.setVisible(not self.details.isVisible())
         if self.details.isVisible():
             self.start.setFocus()
+
+    def make_delete_modes(self) -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("deleteModes")
+        frame.setAccessibleName(tr("Длительность после удаления"))
+        frame.setFixedHeight(34)
+        frame.setStyleSheet("""
+            QFrame#deleteModes { background:#141b25; border:1px solid #374558; border-radius:6px; }
+            QFrame#deleteModes QPushButton { background:transparent; border:1px solid transparent;
+                border-radius:4px; padding:0; }
+            QFrame#deleteModes QPushButton:checked { background:#2b415b; }
+            QFrame#deleteModes QPushButton:hover { border-color:#536d8d; }
+            QFrame#deleteModes QPushButton:focus { border-color:#a9cbff; }
+        """)
+        row = QHBoxLayout(frame)
+        row.setContentsMargins(3, 3, 3, 3)
+        row.setSpacing(2)
+        group = QButtonGroup(frame)
+        self.delete_keep = QPushButton(ui_icon("timelapse"), "")
+        self.delete_shorten = QPushButton(ui_icon("shorten_duration"), "")
+        for button, shorten, hint in (
+            (self.delete_keep, False, tr("Сохранить заданную длительность")),
+            (self.delete_shorten, True, tr("Сократить ролик")),
+        ):
+            button.setCheckable(True)
+            button.setFixedSize(28, 26)
+            button.setIconSize(QSize(18, 18))
+            button.setChecked(shorten == self.shorten_on_delete)
+            button.setAutoDefault(False)
+            button.setToolTip(f"{hint} (Delete)")
+            button.setAccessibleName(hint)
+            button.clicked.connect(lambda checked, value=shorten: self.set_delete_mode(value))
+            group.addButton(button)
+            row.addWidget(button)
+        return frame
+
+    def set_delete_mode(self, shorten: bool) -> None:
+        self.shorten_on_delete = shorten
+        self.delete_mode_changed.emit(shorten)
+        self.montage_seek.setFocus()
+
+    def remove_episode(self) -> None:
+        if not self.modern:
+            self.change("drop")
+            return
+        self.flush_navigation()
+        if self.manual_choice is None and self.drop.isEnabled():
+            self.change("shorten" if self.shorten_on_delete else "refit")
 
     def refresh(self) -> None:
         self.navigation_timer.stop()
@@ -804,6 +855,8 @@ class SourceSelectionDialog(QDialog):
         self.montage_seek.hide()
         self.manual_tools.show()
         self.edit_scope.hide()
+        if self.modern:
+            self.delete_modes.hide()
         self.apply.hide()
         self.undo.hide()
 
@@ -814,8 +867,11 @@ class SourceSelectionDialog(QDialog):
         self.edit_scope.show()
         self.timeline.hide()
         self.montage_seek.show()
+        if self.modern:
+            self.delete_modes.show()
         self.apply.show()
-        self.undo.show()
+        if not self.modern:
+            self.undo.show()
         self.refresh()
         self.seek_montage(self.manual_cursor)
 
@@ -1195,6 +1251,20 @@ class SourceSelectionDialog(QDialog):
                 return
             clock += duration
 
+    def seek_review_source(self, source_id: str, timestamp: int) -> None:
+        for row, start, end in self.montage_seek.blocks:
+            index = self.montage.item(row).data(Qt.ItemDataRole.UserRole)
+            decision = self.session.plan.decisions[index]
+            if (decision.source_id == source_id
+                    and decision.source_start_us <= timestamp < decision.source_end_us):
+                fraction = output_fraction(decision, timestamp)
+                position = start+round((end-start)*fraction)
+                self.seek_montage(max(start+1, min(end-1, position)))
+                self.montage_seek.setFocus()
+                return
+        self.set_message(tr('Этот момент уже отсутствует в текущем монтаже.'))
+        self.show_message()
+
     def seek_bookend(self, ms: int) -> bool:
         if not self.compact or not self.saved_settings_compatible:
             return False
@@ -1217,7 +1287,7 @@ class SourceSelectionDialog(QDialog):
             return False
         cuts = [tuple(p) for p in json.loads(str(plan.settings.get(key, json.dumps(original))))]
         scenes = bookend_scenes(self.video, clock, saved, count, cuts, self.saved_frame_ranges,
-            fps, plan.settings.get('selection_duration_policy') == 'fixed')
+            fps, plan.settings.get('selection_duration_policy') in ('fixed', 'shorten'))
         for a, b, scene in scenes:
             if a <= ms < b or ms == b == self.montage_seek.maximum():
                 self.stop_context()
@@ -1369,13 +1439,23 @@ class SourceSelectionDialog(QDialog):
             if action == "resize":
                 self.session.resize(self.active_index, a, b, self.speed.value())
             else:
-                self.session.select(sid, a, b, None if action == "drop" else self.speed.value())
+                removing = action in ("drop", "shorten", "refit")
+                self.session.select(sid, a, b, None if removing else self.speed.value(),
+                                    shorten=action == "shorten", refit=action == "refit")
             self.refresh()
             self.edit_focus = sid, a
             self.refocus(sid, a)
-            self.set_message(
-                tr("Правка готова. Сохраните изменения, когда закончите редактирование.")
-            )
+            if action == "refit" and selection_frames(
+                self.session.project, self.session.plan,
+                self.session.original.leading, self.session.original.trailing,
+            ) != self.session.plan.settings.get("selection_target_frames"):
+                self.set_message(tr("Оставшихся кадров недостаточно для заданной длительности."))
+            elif action in ("shorten", "refit"):
+                self.set_message(tr("Эпизод убран. Нажмите «Применить правки»."))
+            else:
+                self.set_message(
+                    tr("Правка готова. Сохраните изменения, когда закончите редактирование.")
+                )
         except ValueError as exc:
             self.set_message(str(exc))
 

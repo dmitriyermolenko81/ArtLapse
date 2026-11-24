@@ -57,10 +57,12 @@ def test_old_end_during_seek_does_not_cancel_play_request() -> None:
         playback.loaded(QMediaPlayer.MediaStatus.EndOfMedia)
         assert playback.want_play and playback.awaiting_seek
         playback.resume()
-        assert fake.starts == 1 and fake.seeks[-1] == 5000
+        assert fake.starts == 1 and fake.seeks == [5000]
         playback.pause()
         playback.resume()
         assert fake.starts == 1  # A queued resume cannot undo the user's pause.
+        assert not playback.start_seek.isActive()
+        assert fake.seeks == [5000]
     finally:
         playback.player = native
         playback.shutdown()

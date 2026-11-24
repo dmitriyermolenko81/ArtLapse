@@ -190,11 +190,20 @@ class SourceSelection:
         self.target = edit.plan.actual_frame_count
         self.restored_cursor: int | None = None
         self.restored_view: tuple[float, float] | None = None
+        self.draft_revision: tuple[int, int] | None = None
         self.restore_note = ""
 
     @property
     def changed(self) -> bool:
         return self.plan != self.base
+
+    @property
+    def keep_duration(self) -> bool:
+        return self._keeps_duration(self.plan)
+
+    def _keeps_duration(self, plan: RenderPlan) -> bool:
+        policy = plan.settings.get("selection_duration_policy")
+        return policy == "fixed" or (self.fixed_duration and policy != "shorten")
 
     def trim_movie(self, start_ms: int, end_ms: int) -> None:
         plan, project = self.plan, self.project
@@ -202,7 +211,7 @@ class SourceSelection:
         total = output_frame_count(project.settings, fps, plan.actual_frame_count)
         offset = body_start_frame(project.settings, fps, plan.actual_frame_count)
         a, b = round(start_ms * fps / 1000), round(end_ms * fps / 1000)
-        if plan.settings.get('selection_duration_policy') == 'fixed':
+        if plan.settings.get('selection_duration_policy') in ('shorten', 'fixed'):
             from sculptcut.output_cuts import source_time
 
             ranges = output_ranges(project, plan, self.original.leading, self.original.trailing)
@@ -249,7 +258,7 @@ class SourceSelection:
 
         plan = record_edits(self.project, project, plan,
                             self.original.parent.name, operation, self.plan)
-        if self.fixed_duration:
+        if self._keeps_duration(plan):
             plan = fit_selection(project, plan, self.original.leading, self.original.trailing)
         validate_plan(project, plan)
         self.undo_stack.append((self.plan, self.project))
@@ -282,9 +291,20 @@ class SourceSelection:
             exact_selection=True,
         )
 
-    def select(self, source_id: str, start: int, end: int, speed: float | None) -> None:
+    def select(self, source_id: str, start: int, end: int, speed: float | None, *,
+               shorten: bool = False, refit: bool = False) -> None:
         rule = self.range_rule(source_id, start, end, speed)
-        self.save(change_range(self.plan, rule), put_rule(self.project, rule))
+        plan = change_range(self.plan, rule)
+        if shorten:
+            plan = plan.model_copy(update={'settings': plan.settings | {
+                'selection_duration_policy': 'shorten',
+                'actual_output_frames': output_frame_count(
+                    self.project.settings, plan.output_fps, plan.actual_frame_count)}})
+        elif refit:
+            plan = plan.model_copy(update={"settings": plan.settings | {
+                "selection_duration_policy": "fixed",
+            }})
+        self.save(plan, put_rule(self.project, rule))
 
     def split_points(self) -> set[tuple[str, int]]:
         """Source anchors survive retiming, draft reload and reviewed exports."""
@@ -381,12 +401,12 @@ class SourceSelection:
         if source:
             target.append((self.plan, self.project))
             self.plan, self.project = source.pop()
-            if self.fixed_duration and self.changed:
+            if self.keep_duration and self.changed:
                 self.plan = fit_selection(self.project, self.plan,
                                           self.original.leading, self.original.trailing)
 
     def fit_duration(self, maximum_speed: float = 32) -> None:
-        if self.fixed_duration:
+        if self.fixed_duration or self.keep_duration:
             fitted = fit_selection(self.project, self.plan,
                                    self.original.leading, self.original.trailing)
             if fitted != self.plan:

@@ -64,6 +64,7 @@ class InlineMusic(MusicEditDialog):
         self.lane.seek.connect(self.navigate_lane)
         owner.cursor_changed.connect(self.follow_clock)
         owner.playback.playing_changed.connect(lambda _: self.sync_audio())
+        owner.playback.seek_frame_ready.connect(self.sync_audio)
         owner.sequence.busy_changed.connect(lambda _: self.sync_audio())
         owner.plan_changed.connect(self.video_changed)
         self.video_lane.view_changed.connect(self.lane.set_view)

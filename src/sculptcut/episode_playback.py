@@ -7,11 +7,14 @@ from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QImage
 from PySide6.QtMultimedia import QAudioOutput, QMediaMetaData, QMediaPlayer, QVideoFrame, QVideoSink
 
+from sculptcut.application_identity import configure_multimedia_paths
+
 
 class EpisodePlayback(QObject):
     maximum_preview_fps = 30
     maximum_preview_size = 960
     image_ready = Signal(QImage, int)
+    seek_frame_ready = Signal()
     position_changed = Signal(int)
     playing_changed = Signal(bool)
     failed = Signal(str)
@@ -19,6 +22,7 @@ class EpisodePlayback(QObject):
 
     def __init__(self, parent: QObject) -> None:
         super().__init__(parent)
+        configure_multimedia_paths()
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
         self.audio.setVolume(0.5)
@@ -38,6 +42,10 @@ class EpisodePlayback(QObject):
         self.timer = QTimer(self)
         self.timer.setInterval(20)
         self.timer.timeout.connect(self.check_end)
+        self.start_seek = QTimer(self)
+        self.start_seek.setSingleShot(True)
+        self.start_seek.setInterval(40)
+        self.start_seek.timeout.connect(self.complete_start_seek)
         self.bind_backend()
 
     def bind_backend(self) -> None:
@@ -45,16 +53,14 @@ class EpisodePlayback(QObject):
         self.player.playbackStateChanged.connect(self.state_changed)
         self.player.mediaStatusChanged.connect(self.loaded)
         self.player.errorOccurred.connect(self.error)
-        sink = self.sink
-        self.frame_callback = lambda frame: self.frame_ready(frame) if self.sink is sink else None
-        self.sink.videoFrameChanged.connect(self.frame_callback, Qt.ConnectionType.QueuedConnection)
+        self.sink.videoFrameChanged.connect(self.backend_frame, Qt.ConnectionType.QueuedConnection)
 
     def unbind_backend(self) -> None:
         self.player.positionChanged.disconnect(self.position_changed.emit)
         self.player.playbackStateChanged.disconnect(self.state_changed)
         self.player.mediaStatusChanged.disconnect(self.loaded)
         self.player.errorOccurred.disconnect(self.error)
-        self.sink.videoFrameChanged.disconnect(self.frame_callback)
+        self.sink.videoFrameChanged.disconnect(self.backend_frame)
 
     def take_preloaded(self, other: "EpisodePlayback") -> None:
         """Keep the public playback object, adopt an already decoded paused backend."""
@@ -95,6 +101,7 @@ class EpisodePlayback(QObject):
     def seek(self, position: int) -> None:
         if self.closed:
             return
+        self.start_seek.stop()
         position = max(0, position)
         self.awaiting_seek, self.seek_target = True, position
         self.last_frame_time = 0
@@ -134,16 +141,21 @@ class EpisodePlayback(QObject):
     def resume(self) -> None:
         if self.closed or not self.want_play or self.pending is not None:
             return
-        if self.player.mediaStatus() in (
+        status = self.player.mediaStatus()
+        if status in (
             QMediaPlayer.MediaStatus.NoMedia, QMediaPlayer.MediaStatus.LoadingMedia,
         ):
             return
         if self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
             self.player.play()
-            # EndOfMedia can reset position when play() starts. Apply the queued
-            # source target after that reset, not before it.
+            # A native start can reset a seek made while paused (especially at EOF).
+            # Give the decoder a chance to deliver the requested frame before retrying.
             if self.awaiting_seek:
-                self.player.setPosition(self.seek_target)
+                self.start_seek.start()
+
+    def complete_start_seek(self) -> None:
+        if self.want_play and self.awaiting_seek and self.pending is None:
+            self.player.setPosition(self.seek_target)
 
     def is_advancing(self) -> bool:
         """Audio may follow only a running decoder that has delivered a recent frame."""
@@ -160,6 +172,7 @@ class EpisodePlayback(QObject):
         was_playing = self.want_play
         self.want_play = False
         self.timer.stop()
+        self.start_seek.stop()
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player.pause()
         if was_playing:
@@ -185,6 +198,10 @@ class EpisodePlayback(QObject):
             self.finished.emit()
 
     @Slot(QVideoFrame)
+    def backend_frame(self, frame: QVideoFrame) -> None:
+        if self.sender() is self.sink:
+            self.frame_ready(frame)
+
     def frame_ready(self, frame: QVideoFrame) -> None:
         if self.closed or self.pending is not None or not frame.isValid():
             return
@@ -193,12 +210,14 @@ class EpisodePlayback(QObject):
         # A frame outside the selected source interval never belongs to it.
         if self.limit_frames and not self.start <= timestamp < self.end:
             return
-        if self.awaiting_seek:
+        seek_frame = self.awaiting_seek
+        if seek_frame:
             fps = self.player.metaData().value(QMediaMetaData.Key.VideoFrameRate)
             tolerance = max(250, 1000/float(fps)) if fps else 250
             if abs(timestamp-self.seek_target) > tolerance:
                 return
             self.awaiting_seek = False
+            self.start_seek.stop()
         now = monotonic()
         fps = self.player.metaData().value(QMediaMetaData.Key.VideoFrameRate)
         incoming_rate = float(fps)*self.player.playbackRate() if fps else 0
@@ -212,6 +231,8 @@ class EpisodePlayback(QObject):
                 image = image.scaled(self.maximum_preview_size, self.maximum_preview_size,
                                      Qt.AspectRatioMode.KeepAspectRatio)
             self.image_ready.emit(image, timestamp)
+            if seek_frame:
+                self.seek_frame_ready.emit()
 
     def error(self, error: QMediaPlayer.Error, message: str) -> None:
         self.pause()

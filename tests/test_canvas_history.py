@@ -6,14 +6,16 @@ from threading import Event
 import cv2
 import numpy as np
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
+from test_episode_panel import wait_until
 
 from sculptcut.canvas_history import CanvasMemory, compose_history, enabled
 from sculptcut.domain import ProjectSettings
-from sculptcut.media import Cancelled
+from sculptcut.media import Cancelled, discover, run_process
 from sculptcut.photoshop import reframe_photoshop
+from sculptcut.photoshop_review_dialog import PhotoshopReviewDialog
 from sculptcut.planning import build_plan, validate_plan
 from sculptcut.project import create_project, load_project, save_project
 from sculptcut.rendering import render, verify_output
@@ -126,8 +128,10 @@ def test_real_video_updates_head_then_feet_without_losing_the_rest(tmp_path: Pat
     with pytest.raises(ValueError, match="Canvas memory changed"):
         validate_plan(off, plan)
     assert not enabled(project.settings.model_copy(update={"shorts_layout": "square"}))
-    output = render(root, project, plan, tmp_path / "whole.mp4", encoder="libx264")
+    output = render(root, project, plan, root / "renders" / "whole.mp4", encoder="libx264")
     verify_output(output, 70, 10)
+    run_process([discover('ffmpeg'), '-v', 'error', '-xerror', '-i', str(output),
+                 '-f', 'null', '-'])
     capture = cv2.VideoCapture(str(output))
     frames = []
     while True:
@@ -153,6 +157,46 @@ def test_real_video_updates_head_then_feet_without_losing_the_rest(tmp_path: Pat
 
     assert areas(frames[35])[1] > 1000  # a brief gap holds the complete model
     assert areas(frames[59])[1] > 1000 and areas(frames[59])[2] > 1000
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    window.show()
+    window.folder.setText(str(root))
+    window.open_video(output, 'Photoshop Shorts')
+    try:
+        assert window.review_button.isVisible() and window.review_button.isEnabled()
+        QTest.mouseClick(window.review_button, Qt.MouseButton.LeftButton)
+        dialog = window.findChild(PhotoshopReviewDialog)
+        assert dialog is not None and dialog.isVisible()
+        row, marker = next((i, m) for i, m in enumerate(dialog.markers)
+                           if m.decision.source_id == project.sources[3].id)
+        QTest.mouseClick(dialog.timeline, Qt.MouseButton.LeftButton,
+                         pos=QPoint(dialog.timeline.x_at(marker.start), 10))
+        assert dialog.choices.currentIndex() == row
+        assert dialog.frame_slider.value() == 30
+        wait_until(app, lambda: not dialog.montage.frame.isNull()
+                   and not dialog.original.frame.isNull())
+        assert any(key[:2] == (output.resolve(), 3_000_000)
+                   for key in dialog.montage.images.cache)
+        assert any(key[:2] == (paths[3].resolve(), 0) for key in dialog.original.images.cache)
+        dialog.frame_slider.setValue(35)
+        wait_until(app, lambda: any(key[1] == 500_000 for key in dialog.original.images.cache))
+        wait_until(app, lambda: any(key[1] == 3_500_000 for key in dialog.montage.images.cache))
+        edit = next(button for button in dialog.findChildren(QPushButton)
+                    if button.text() == 'Открыть эпизод в редакторе')
+        QTest.mouseClick(edit, Qt.MouseButton.LeftButton)
+        wait_until(app, lambda: window.selection_dialog is not None
+                   and not window.selection_dialog.loading)
+        editor = window.selection_dialog
+        assert editor.isVisible() and editor.montage_seek.value() == 3500
+        assert editor.sources.currentData() == project.sources[3].id
+        assert not editor.session.changed
+    finally:
+        if (dialog := window.findChild(PhotoshopReviewDialog)) is not None:
+            dialog.reject()
+        window._allow_close = True
+        window.close()
+        app.processEvents()
     assert areas(frames[65])[2] > 1000  # feet survive recovery of the head update
     b, g, r = cv2.split(frames[65])
     assert np.count_nonzero((r > 160) & (g > 160) & (b < 65)) > 1000

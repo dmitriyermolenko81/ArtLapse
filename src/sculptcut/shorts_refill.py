@@ -62,6 +62,18 @@ def cuts_on_plan_clock(
     return removed
 
 
+def saved_frame_ranges(video: Path, project: Project, plan: RenderPlan) -> list[tuple[int, int]]:
+    """Retained plan frames, ordered exactly as they appear in the saved MP4."""
+    from sculptcut.output_cuts import retained_ranges
+
+    fps = plan.output_fps
+    total = output_frame_count(project.settings, fps, plan.actual_frame_count)
+    baked = cuts_on_plan_clock(video, project, plan, [])
+    cuts = [(max(0, min(total, a*fps//1_000_000)),
+             max(0, min(total, (b*fps+999_999)//1_000_000))) for a, b in baked]
+    return retained_ranges(total, [(a, b) for a, b in cuts if a < b])
+
+
 def refill_render_context(
     video: Path, project: Project, plan: RenderPlan,
 ) -> tuple[Project, RenderPlan]:

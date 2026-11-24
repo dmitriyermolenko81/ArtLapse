@@ -1,6 +1,7 @@
 import os
 from dataclasses import replace
 from pathlib import Path
+from shutil import copy2
 from threading import Event
 from time import monotonic, sleep
 
@@ -204,7 +205,9 @@ def test_entire_folder_cancel_then_delete_preserves_external_files(project_root:
 
 
 @pytest.mark.parametrize("asset", ["source", "music_folder", "intro_image", "presentation_video"])
-def test_entire_folder_blocks_inputs_inside_project(project_root: Path, asset: str) -> None:
+def test_entire_folder_requires_permission_for_inputs_inside_project(
+    project_root: Path, asset: str,
+) -> None:
     from sculptcut.project import load_project
 
     root = project_root
@@ -228,7 +231,16 @@ def test_entire_folder_blocks_inputs_inside_project(project_root: Path, asset: s
     save_project(root, project)
     with pytest.raises(ValueError, match="исходники, музыка или заставка"):
         project_deletion_target(root)
+    target = project_deletion_target(root, include_inputs=True)
+    assert target.contained_inputs == (path,)
+    rejected = remove_project_folder(target, Event(), lambda _: None)
+    assert rejected.errors and rejected.removed == 0
     assert path.exists() and (root / "renders" / "готовый.mp4").is_file()
+    original = root.parent / "исходник.mp4"
+    original_bytes = original.read_bytes()
+    result = remove_project_folder(target, Event(), lambda _: None, include_inputs=True)
+    assert not result.errors and not result.cancelled and not root.exists()
+    assert original.read_bytes() == original_bytes
 
 
 def test_entire_folder_rejects_links_before_removing_any_file(project_root: Path) -> None:
@@ -307,9 +319,26 @@ def test_replaced_project_folder_and_unsaved_input_are_never_deleted(project_roo
     assert (root / "project.json").is_file() and (moved / "project.json").is_file()
 
 
+@pytest.mark.parametrize(("with_sources", "keep_sources"),
+                         [(False, False), (True, False), (True, True)])
 def test_full_project_gui_confirmation_then_deletion_resets_session(
-    project_root: Path, monkeypatch: pytest.MonkeyPatch,
+    project_root: Path, with_sources: bool, keep_sources: bool,
 ) -> None:
+    from sculptcut.project import load_project
+
+    original = project_root.parent / "исходник.mp4"
+    inside = project_root / "исходник внутри.mp4"
+    if with_sources:
+        copy2(original, inside)
+        project = load_project(project_root)
+        save_project(project_root, project.model_copy(update={
+            "sources": [project.sources[0].model_copy(update={"path": inside})],
+        }))
+    extra = project_root / "не добавлено.mp4"
+    extra.write_bytes(b"not registered")
+    plan = project_root / "render_plan.json"
+    plan.write_text("{}", encoding="utf-8")
+
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
     window.recent_settings = QSettings(str(project_root.parent / "gui.ini"),
@@ -318,24 +347,37 @@ def test_full_project_gui_confirmation_then_deletion_resets_session(
     window.open_project_folder(project_root)
     dialog = CleanupDialog(project_root, cleanup_files(project_root), window)
     dialog.delete_project.setChecked(True)
+    if with_sources:
+        assert dialog.remove_button.text() == "Удалить с исходниками"
 
     def cancel_confirm() -> None:
         confirm = app.activeModalWidget()
         assert isinstance(confirm, QMessageBox)
         assert str(project_root.absolute()) in confirm.informativeText()
         assert confirm.defaultButton().text() == "Отмена"
+        if with_sources:
+            assert confirm.text() == (
+                "Исходники находятся внутри папки проекта. "
+                "Хотите удалить проект вместе с исходниками?"
+            )
         confirm.reject()
 
     QTimer.singleShot(0, cancel_confirm)
     dialog.confirm_selection()
     assert dialog.result() != QDialog.DialogCode.Accepted and project_root.exists()
+    assert not dialog.confirmed_inputs
+    assert inside.exists() == with_sources
     dialog.close()
 
     def approve_confirm() -> None:
         confirm = app.activeModalWidget()
         assert isinstance(confirm, QMessageBox)
         for button in confirm.buttons():
-            if confirm.buttonRole(button) == QMessageBox.ButtonRole.DestructiveRole:
+            expected = (QMessageBox.ButtonRole.AcceptRole if keep_sources
+                        else QMessageBox.ButtonRole.DestructiveRole)
+            if confirm.buttonRole(button) == expected:
+                if keep_sources:
+                    assert button.text() == "Удалить проект, оставить исходники"
                 button.click()
                 break
 
@@ -354,7 +396,13 @@ def test_full_project_gui_confirmation_then_deletion_resets_session(
             app.processEvents()
             sleep(0.01)
         assert window.job is None and not window.last_error
-        assert not project_root.exists()
+        assert project_root.exists() == keep_sources
+        assert not (project_root / "project.json").exists()
+        if keep_sources:
+            assert inside.read_bytes() == original.read_bytes()
+            assert extra.read_bytes() == b"not registered"
+            assert (project_root / "renders" / "готовый.mp4").is_file()
+            assert not plan.exists() and not (project_root / "analysis.sqlite").exists()
         assert not window.folder.text() and window.sources.count() == 0
         assert project_root not in window.recent_project_paths()
         assert window.player.source().isEmpty() and not window.cleanup_button.isEnabled()
@@ -362,4 +410,4 @@ def test_full_project_gui_confirmation_then_deletion_resets_session(
     finally:
         window.close()
         app.processEvents()
-    assert not project_root.exists() and (project_root.parent / "исходник.mp4").is_file()
+    assert project_root.exists() == keep_sources and original.is_file()

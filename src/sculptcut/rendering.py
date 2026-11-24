@@ -9,6 +9,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from threading import Event
 
+from sculptcut import render_cache
 from sculptcut.audio import add_music, validate_music
 from sculptcut.bookends import bookend_filter, final_frames
 from sculptcut.domain import Project, Roi
@@ -19,7 +20,7 @@ from sculptcut.media import Cancelled, MediaError, discover, doctor, parse_probe
 from sculptcut.music_library import soundtrack
 from sculptcut.planning import RenderDecision, RenderPlan, validate_plan
 from sculptcut.presentation import attach_presentation, presentation_frames
-from sculptcut.project import atomic_write, validate_sources
+from sculptcut.project import atomic_write, cache_key, validate_sources
 from sculptcut.proxy import proxy_path
 from sculptcut.render_batches import coalesce_chunks
 from sculptcut.screen_cache import screen_check_cache
@@ -432,206 +433,233 @@ def _render(
         names = []
         completed = 0
         batches = coalesce_chunks(chunk_decisions(plan), sources, fps)
-        for index, decision in enumerate(batches):
-            name = f"chunk-{index:06d}.{chunk_suffix}"
-            if reusable_chunk(temporary, name):
+        cache = root / "cache" / "render-v1"
+        tail = final_frames(plan)
+        keys = [cache_key(
+            "chunk-1", encoder, width, height, fps, square, lossless_canvas,
+            project.settings.preset, sources[d.source_id].model_dump(), d.model_dump(),
+            plan.settings.get("quiet_hold_zoom_max"),
+            plan.settings.get("quiet_hold_zoom_min_seconds"),
+            bool(tail and d.source_id == finale.source_id
+                 and d.source_start_us == finale.source_start_us),
+        ) for d in batches]
+        body_key = cache_key("body-1", keys, tail, plan.settings.get("story") == "process",
+                             plan.settings.get("photoshop_camera"),
+                             bool(plan.settings.get("photoshop_frame_only")))
+        normalized = temporary / "normalized.mp4"
+        cached_guard = render_cache.restore(cache, body_key, normalized)
+        if cached_guard is None:
+            for index, decision in enumerate(batches):
+                name = f"chunk-{index:06d}.{chunk_suffix}"
+                if (reusable_chunk(temporary, name) or render_cache.restore(
+                        cache, keys[index], temporary / name, private=True) is not None):
+                    names.append(name)
+                    completed += decision.output_frame_count
+                    if progress:
+                        progress(completed / plan.actual_frame_count * 0.85)
+                    continue
+                (temporary / name).unlink(missing_ok=True)
+                source = sources[decision.source_id]
+                still_input = decision.action == "HOLD" or decision.output_frame_count == 1
+                media_path = proxy_path(root, project, source) if preview else source.path
+                input_args = [
+                    "-ss", f"{decision.source_start_us / 1e6:.6f}",
+                    "-reinit_filter", "0", "-i", str(media_path),
+                ]
+                stream_map = "0:v:0" if preview else f"0:{source.stream_index}"
+                if still_input:
+                    timestamp = decision.source_start_us
+                    if decision.provenance in ("user:final_tail", "user:shorts_final"):
+                        timestamp = max(timestamp, decision.source_end_us - math.ceil(
+                            1_000_000*source.fps_den/source.fps_num))
+                    media_path = still_frame(
+                        source, timestamp, temporary / "still.png", cancel,
+                    )
+                    input_args = ["-loop", "1", "-framerate", str(fps), "-i", str(media_path)]
+                    stream_map = "0:v:0"
+                duration = (decision.source_end_us - decision.source_start_us) / 1_000_000
+                count = decision.output_frame_count
+                ratio = count / fps / duration
+                padding = count / fps
+                still_motion = ""
+                if still_input:
+                    duration, ratio, padding = 1 / fps, 1, count / fps
+                    zoom_max = float(plan.settings.get("quiet_hold_zoom_max", 1.0))
+                    quiet_min = float(plan.settings.get("quiet_hold_zoom_min_seconds", 0.7))
+                    if (
+                        project.settings.preset == "beat_shorts"
+                        and count / fps >= quiet_min
+                        and count > 1
+                        and zoom_max > 1
+                        and not (final_frames(plan) and decision.source_id == finale.source_id
+                                 and decision.source_start_us == finale.source_start_us)
+                    ):
+                        increment = (zoom_max - 1) / (count - 1)
+                        still_motion = (
+                            f"loop=loop={count - 1}:size=1:start=0,"
+                            f"zoompan=z='min(zoom+{increment:.10f},{zoom_max:.6f})':"
+                            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                            f"d=1:s={width}x{width if square else height}:fps={fps},"
+                        )
+                codec_options = (
+                    ["-preset", "p4", "-cq", str(INTERMEDIATE_QUALITY)]
+                    if encoder == "h264_nvenc"
+                    else ["-preset", "fast", "-crf", str(INTERMEDIATE_QUALITY)]
+                )
+                crop_filter = ""
+                if isinstance(decision.crop, Roi):
+                    crop = decision.crop
+                    crop_filter = (
+                        f"crop=w='max(2,trunc(iw*{crop.width:.9f}/2)*2)':"
+                        f"h='max(2,trunc(ih*{crop.height:.9f}/2)*2)':"
+                        f"x='min(iw-ow,trunc(iw*{crop.x:.9f}/2)*2)':"
+                        f"y='min(ih-oh,trunc(ih*{crop.y:.9f}/2)*2)',"
+                    )
+                name = f"chunk-{index:06d}.{chunk_suffix}"
+                composition = (
+                    f"scale={width}:{height}:force_original_aspect_ratio=decrease:"
+                    f"force_divisible_by=2:flags=lanczos,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+                )
+                if project.settings.preset in SHORTS_PRESETS:
+                    composition = (
+                        f"split[back][front];[back]scale={width}:{height}:"
+                        f"force_original_aspect_ratio=increase,crop={width}:{height},"
+                        "boxblur=30:2[blur];[front]"
+                        f"scale={width}:{height}:force_original_aspect_ratio=decrease:"
+                        "force_divisible_by=2:flags=lanczos[sharp];"
+                        "[blur][sharp]overlay=(W-w)/2:(H-h)/2,"
+                    )
+                if decision.subject_camera:
+                    sw, sh = source.width, source.height
+                    if source.rotation % 180 == 90:
+                        sw, sh = sh, sw
+                    crop_filter = ""
+                    composition = camera_filter(
+                        decision.subject_camera, decision.source_start_us, ratio, sw, sh,
+                        width, width if square else height
+                    )
+                if square:
+                    if not isinstance(decision.crop, Roi):
+                        raise ValueError("Square Shorts requires a planned source crop")
+                    if decision.subject_camera is None:
+                        composition = f"scale={width}:{width}:flags=lanczos,"
+                    still_motion += square_composition(width, height)
+                filter_path = temporary / "frame-filter.txt"
+                from sculptcut.timewarp import pts_expression
+
+                timing_filter = (
+                    f"trim=end_frame=1,loop=loop=-1:size=1:start=0,setpts=N/{fps}/TB,"
+                    if still_input else
+                    f"setpts=PTS-STARTPTS,trim=duration={duration:.6f},"
+                    f"setpts={pts_expression(decision,fps)},"
+                )
+                filter_path.write_text(
+                    (SDR_RGB_FILTER if lossless_canvas else SDR_FILTER) + "," + timing_filter +
+                    f"fps={fps},trim=end_frame={count},{crop_filter}{composition}setsar=1,{still_motion}"
+                    f"tpad=stop_mode=clone:stop_duration={padding:.8f}",
+                    encoding="utf-8",
+                )
+                run_process(
+                    [
+                        discover("ffmpeg"),
+                        "-v",
+                        "error",
+                        "-nostdin",
+                        "-xerror",
+                        "-filter_threads", str(FILTER_THREADS),
+                        "-filter_complex_threads", str(FILTER_THREADS),
+                        *input_args,
+                        "-map",
+                        stream_map,
+                        "-an",
+                        "-filter_script:v",
+                        str(filter_path),
+                        "-frames:v",
+                        str(count),
+                        "-c:v",
+                        "ffv1" if lossless_canvas else encoder,
+                        *(["-level", "3", "-threads", "2"] if lossless_canvas else codec_options),
+                        "-pix_fmt",
+                        "bgr0" if lossless_canvas else "yuv420p",
+                        *(RGB_ENCODER_ARGS if lossless_canvas else SDR_ENCODER_ARGS),
+                        str(temporary / name),
+                    ],
+                    cancel,
+                )
+                verify_output(temporary / name, count, fps, cancel)
+                render_cache.remember(cache, keys[index], temporary / name, [], private=True)
+                if index % 16 == 15:
+                    render_cache.trim_cache(cache)
+                record_chunk(temporary, name)
                 names.append(name)
-                completed += decision.output_frame_count
+                completed += count
                 if progress:
                     progress(completed / plan.actual_frame_count * 0.85)
-                continue
-            (temporary / name).unlink(missing_ok=True)
-            source = sources[decision.source_id]
-            still_input = decision.action == "HOLD" or decision.output_frame_count == 1
-            media_path = proxy_path(root, project, source) if preview else source.path
-            input_args = [
-                "-ss", f"{decision.source_start_us / 1e6:.6f}",
-                "-reinit_filter", "0", "-i", str(media_path),
-            ]
-            stream_map = "0:v:0" if preview else f"0:{source.stream_index}"
-            if still_input:
-                timestamp = decision.source_start_us
-                if decision.provenance in ("user:final_tail", "user:shorts_final"):
-                    timestamp = max(timestamp, decision.source_end_us - math.ceil(
-                        1_000_000*source.fps_den/source.fps_num))
-                media_path = still_frame(
-                    source, timestamp, temporary / "still.png", cancel,
+            listing = temporary / "concat.txt"
+            listing.write_text("".join(f"file '{name}'\n" for name in names), encoding="utf-8")
+            combined = temporary / "combined.mp4"
+            combined.unlink(missing_ok=True)
+            if not lossless_canvas:
+                run_process(
+                    [
+                        discover("ffmpeg"),
+                        "-v",
+                        "error",
+                        "-nostdin",
+                        "-f",
+                        "concat",
+                        "-safe",
+                        "1",
+                        "-i",
+                        str(listing),
+                        "-c",
+                        "copy",
+                        "-movflags",
+                        "+faststart",
+                        str(combined),
+                    ],
+                    cancel,
                 )
-                input_args = ["-loop", "1", "-framerate", str(fps), "-i", str(media_path)]
-                stream_map = "0:v:0"
-            duration = (decision.source_end_us - decision.source_start_us) / 1_000_000
-            count = decision.output_frame_count
-            ratio = count / fps / duration
-            padding = count / fps
-            still_motion = ""
-            if still_input:
-                duration, ratio, padding = 1 / fps, 1, count / fps
-                zoom_max = float(plan.settings.get("quiet_hold_zoom_max", 1.0))
-                quiet_min = float(plan.settings.get("quiet_hold_zoom_min_seconds", 0.7))
-                if (
-                    project.settings.preset == "beat_shorts"
-                    and count / fps >= quiet_min
-                    and count > 1
-                    and zoom_max > 1
-                    and not (final_frames(plan) and decision.source_id == finale.source_id
-                             and decision.source_start_us == finale.source_start_us)
-                ):
-                    increment = (zoom_max - 1) / (count - 1)
-                    still_motion = (
-                        f"loop=loop={count - 1}:size=1:start=0,"
-                        f"zoompan=z='min(zoom+{increment:.10f},{zoom_max:.6f})':"
-                        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-                        f"d=1:s={width}x{width if square else height}:fps={fps},"
-                    )
-            codec_options = (
-                ["-preset", "p4", "-cq", str(INTERMEDIATE_QUALITY)]
-                if encoder == "h264_nvenc"
-                else ["-preset", "fast", "-crf", str(INTERMEDIATE_QUALITY)]
-            )
-            crop_filter = ""
-            if isinstance(decision.crop, Roi):
-                crop = decision.crop
-                crop_filter = (
-                    f"crop=w='max(2,trunc(iw*{crop.width:.9f}/2)*2)':"
-                    f"h='max(2,trunc(ih*{crop.height:.9f}/2)*2)':"
-                    f"x='min(iw-ow,trunc(iw*{crop.x:.9f}/2)*2)':"
-                    f"y='min(ih-oh,trunc(ih*{crop.y:.9f}/2)*2)',"
-                )
-            name = f"chunk-{index:06d}.{chunk_suffix}"
-            composition = (
-                f"scale={width}:{height}:force_original_aspect_ratio=decrease:"
-                f"force_divisible_by=2:flags=lanczos,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-            )
-            if project.settings.preset in SHORTS_PRESETS:
-                composition = (
-                    f"split[back][front];[back]scale={width}:{height}:"
-                    f"force_original_aspect_ratio=increase,crop={width}:{height},"
-                    "boxblur=30:2[blur];[front]"
-                    f"scale={width}:{height}:force_original_aspect_ratio=decrease:"
-                    "force_divisible_by=2:flags=lanczos[sharp];"
-                    "[blur][sharp]overlay=(W-w)/2:(H-h)/2,"
-                )
-            if decision.subject_camera:
-                sw, sh = source.width, source.height
-                if source.rotation % 180 == 90:
-                    sw, sh = sh, sw
-                crop_filter = ""
-                composition = camera_filter(
-                    decision.subject_camera, decision.source_start_us, ratio, sw, sh,
-                    width, width if square else height
-                )
-            if square:
-                if not isinstance(decision.crop, Roi):
-                    raise ValueError("Square Shorts requires a planned source crop")
-                if decision.subject_camera is None:
-                    composition = f"scale={width}:{width}:flags=lanczos,"
-                still_motion += square_composition(width, height)
-            filter_path = temporary / "frame-filter.txt"
-            from sculptcut.timewarp import pts_expression
+            normalized = temporary / "normalized.mp4"
+            normalized.unlink(missing_ok=True)
+            from sculptcut.canvas_history import compose_history
 
-            timing_filter = (
-                f"trim=end_frame=1,loop=loop=-1:size=1:start=0,setpts=N/{fps}/TB,"
-                if still_input else
-                f"setpts=PTS-STARTPTS,trim=duration={duration:.6f},"
-                f"setpts={pts_expression(decision,fps)},"
-            )
-            filter_path.write_text(
-                (SDR_RGB_FILTER if lossless_canvas else SDR_FILTER) + "," + timing_filter +
-                f"fps={fps},trim=end_frame={count},{crop_filter}{composition}setsar=1,{still_motion}"
-                f"tpad=stop_mode=clone:stop_duration={padding:.8f}",
-                encoding="utf-8",
-            )
-            run_process(
-                [
-                    discover("ffmpeg"),
-                    "-v",
-                    "error",
-                    "-nostdin",
-                    "-xerror",
-                    "-filter_threads", str(FILTER_THREADS),
-                    "-filter_complex_threads", str(FILTER_THREADS),
-                    *input_args,
-                    "-map",
-                    stream_map,
-                    "-an",
-                    "-filter_script:v",
-                    str(filter_path),
-                    "-frames:v",
-                    str(count),
-                    "-c:v",
-                    "ffv1" if lossless_canvas else encoder,
-                    *(["-level", "3", "-threads", "2"] if lossless_canvas else codec_options),
-                    "-pix_fmt",
-                    "bgr0" if lossless_canvas else "yuv420p",
-                    *(RGB_ENCODER_ARGS if lossless_canvas else SDR_ENCODER_ARGS),
-                    str(temporary / name),
-                ],
+            if lossless_canvas:
+                assembled = temporary / "canvas.mkv"
+                assembled.unlink(missing_ok=True)
+                compose_history(
+                    [(temporary / name, decision)
+                     for name, decision in zip(names, batches, strict=True)],
+                    sources, assembled, fps, width, height, cancel,
+                    (lambda value: progress(.85 + value*.05)) if progress else None,
+                    page_alignment=str(plan.settings.get('photoshop_camera', '')).startswith(
+                        'enclosed-page-'),
+                    accumulate=not bool(plan.settings.get('photoshop_frame_only')),
+                    guard_document_edges=plan.settings.get('photoshop_camera')=='fixed-reference-352',
+                )
+                combined = assembled
+            guarded_frames = normalize_timing(
+                combined,
+                normalized,
+                fps,
                 cancel,
+                screen_guard=plan.settings.get("story") == "process",
+                bookend_plan=plan,
+                square_bands=square,
+                encoder=encoder,
+                quality=CANVAS_DELIVERY_CRF if lossless_canvas else FINAL_CRF,
             )
-            verify_output(temporary / name, count, fps, cancel)
-            record_chunk(temporary, name)
-            names.append(name)
-            completed += count
+            combined = normalized
             if progress:
-                progress(completed / plan.actual_frame_count * 0.85)
-        listing = temporary / "concat.txt"
-        listing.write_text("".join(f"file '{name}'\n" for name in names), encoding="utf-8")
-        combined = temporary / "combined.mp4"
-        combined.unlink(missing_ok=True)
-        if not lossless_canvas:
-            run_process(
-                [
-                    discover("ffmpeg"),
-                    "-v",
-                    "error",
-                    "-nostdin",
-                    "-f",
-                    "concat",
-                    "-safe",
-                    "1",
-                    "-i",
-                    str(listing),
-                    "-c",
-                    "copy",
-                    "-movflags",
-                    "+faststart",
-                    str(combined),
-                ],
-                cancel,
-            )
-        normalized = temporary / "normalized.mp4"
-        normalized.unlink(missing_ok=True)
-        from sculptcut.canvas_history import compose_history
-
-        if lossless_canvas:
-            assembled = temporary / "canvas.mkv"
-            assembled.unlink(missing_ok=True)
-            compose_history(
-                [(temporary / name, decision)
-                 for name, decision in zip(names, batches, strict=True)],
-                sources, assembled, fps, width, height, cancel,
-                (lambda value: progress(.85 + value*.05)) if progress else None,
-                page_alignment=str(plan.settings.get('photoshop_camera', '')).startswith(
-                    'enclosed-page-'),
-                accumulate=not bool(plan.settings.get('photoshop_frame_only')),
-                guard_document_edges=plan.settings.get('photoshop_camera')=='fixed-reference-352',
-            )
-            combined = assembled
-        guarded_frames = normalize_timing(
-            combined,
-            normalized,
-            fps,
-            cancel,
-            screen_guard=plan.settings.get("story") == "process",
-            bookend_plan=plan,
-            square_bands=square,
-            encoder=encoder,
-            quality=CANVAS_DELIVERY_CRF if lossless_canvas else FINAL_CRF,
-        )
-        combined = normalized
-        if progress:
-            progress(0.95)
-        verify_output(combined, plan.actual_frame_count, fps, cancel)
+                progress(0.95)
+            verify_output(combined, plan.actual_frame_count, fps, cancel)
+            render_cache.remember(cache, body_key, normalized, guarded_frames)
+        else:
+            combined = normalized
+            guarded_frames = cached_guard
+            if progress:
+                progress(0.95)
+        render_cache.trim_cache(cache)
         # An ending cover is the last bookend, after an ending presentation too.
         presentation_first = project.settings.intro_position == "end"
         if project.settings.presentation_video is not None and presentation_first:
@@ -697,6 +725,7 @@ def _render(
                             extra_files=(guard,) if guarded_frames else ()):
             save_variant(
                 destination,
+                ready=combined,
                 project=variant_project or project,
                 plan=plan,
                 music=music,

@@ -1,12 +1,14 @@
 """A complete turnaround clip fitted to a short presentation before/after the montage."""
 
 import tempfile
+from fractions import Fraction
 from pathlib import Path
 from threading import Event
 
 from sculptcut.domain import ProjectSettings
 from sculptcut.media import discover, probe, run_process
 from sculptcut.project import fingerprint
+from sculptcut.remux_check import decode_delay, video_samples
 from sculptcut.shorts_layout import SHORTS_PRESETS, SQUARE_BACKGROUND, uses_square
 from sculptcut.video_color import CANVAS_DELIVERY_CRF, SDR_ENCODER_ARGS, SDR_FILTER
 
@@ -39,6 +41,8 @@ def attach_presentation(
     if not info.duration_us:
         raise ValueError("Не удалось определить длительность видео-презентации")
     count = presentation_frames(settings, fps)
+    body_info = probe(body, cancel)
+    timescale = Fraction(body_info.time_base).denominator
     ratio = count * 1_000_000 / (fps * info.duration_us)
     composition = (
         f"scale={width}:{height}:force_original_aspect_ratio=decrease:"
@@ -79,15 +83,21 @@ def attach_presentation(
             "-reinit_filter", "0", "-i", str(video), "-map", f"0:{info.stream_index}",
             "-an", "-filter_script:v", str(script), "-frames:v", str(count),
             "-fps_mode", "passthrough", "-enc_time_base", f"1:{fps}",
-            "-c:v", encoder, *quality, "-pix_fmt", "yuv420p", *SDR_ENCODER_ARGS, str(clip),
+            "-c:v", encoder, *quality, "-pix_fmt", "yuv420p", *SDR_ENCODER_ARGS,
+            "-video_track_timescale", str(timescale), str(clip),
         ], cancel)
         listing = scratch / "concat.txt"
         paths = [clip, body] if settings.presentation_position == "start" else [body, clip]
+        durations = {clip: count / fps, body: video_samples(body, cancel) / fps}
+        delay = max(decode_delay(path, fps, cancel) for path in paths)
         listing.write_text("".join(
-            "file '" + path.resolve().as_posix().replace("'", "'\\''") + "'\n" for path in paths
+            "file '" + path.resolve().as_posix().replace("'", "'\\''")
+            + f"'\nduration {durations[path]:.9f}\n"
+            for path in paths
         ), encoding="utf-8")
         run_process([
             discover("ffmpeg"), "-v", "error", "-nostdin", "-xerror", "-f", "concat",
             "-safe", "0", "-i", str(listing), "-map", "0:v:0", "-an", "-c:v", "copy",
+            "-bsf:v", f"setts=pts=PTS:dts=(N-{delay})*DURATION",
             "-movflags", "+faststart", str(output),
         ], cancel)

@@ -49,9 +49,11 @@ class CleanupDialog(QDialog):
         self.root = root
         self.files = files
         self.project_target: ProjectFolder | None = None
+        self.confirmed_inputs = False
+        self.keep_inputs = False
         self.folder_error = ""
         try:
-            self.project_target = project_deletion_target(root, extra_inputs)
+            self.project_target = project_deletion_target(root, extra_inputs, include_inputs=True)
         except (OSError, ValueError) as exc:
             self.folder_error = tr(str(exc))
         layout = QVBoxLayout(self)
@@ -188,12 +190,22 @@ class CleanupDialog(QDialog):
         self.summary.setText(tr("Проект будет закрыт") if whole else
                              tr(f"{len(files)} файлов · {format_bytes(sum(f.size for f in files))}")
                              if files else tr("Выберите, что удалить"))
-        self.warning.setText(self.folder_error if whole and self.project_target is None else
-                             tr("Удалится папка со всеми файлами и настройками.") if whole else
-                             tr("Исходники и настройки проекта сохранятся."))
+        contains_inputs = bool(self.project_target and self.project_target.contained_inputs)
+        if not whole:
+            warning = tr("Исходники и настройки проекта сохранятся.")
+        elif self.project_target is None:
+            warning = self.folder_error
+        elif contains_inputs:
+            warning = tr("Исходники и другие файлы внутри папки тоже будут удалены.")
+        else:
+            warning = tr("Удалится папка со всеми файлами и настройками.")
+        self.warning.setText(warning)
         self.details_button.setVisible(bool(files))
         self.toggle_details(self.details_button.isChecked())
-        self.remove_button.setText(tr("Удалить проект") if whole else tr("Удалить"))
+        self.remove_button.setText(
+            tr("Удалить с исходниками") if whole and contains_inputs
+            else tr("Удалить проект") if whole else tr("Удалить"),
+        )
         self.remove_button.setEnabled((whole and self.project_target is not None) or bool(files))
 
     def confirm_project_deletion(self) -> bool:
@@ -202,20 +214,48 @@ class CleanupDialog(QDialog):
         confirm.setIcon(QMessageBox.Icon.Warning)
         confirm.setTextFormat(Qt.TextFormat.PlainText)
         confirm.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        confirm.setText(tr("Будут удалены папка проекта и всё её содержимое."))
+        contains_inputs = bool(self.project_target and self.project_target.contained_inputs)
+        confirm.setText(
+            tr("Исходники находятся внутри папки проекта. "
+               "Хотите удалить проект вместе с исходниками?")
+            if contains_inputs else tr("Будут удалены папка проекта и всё её содержимое."),
+        )
         confirm.setInformativeText(
             str(self.root.absolute()) + tr("\n\nЭто действие нельзя отменить.")
+            + (tr("\n\nЕсли оставить исходники, удалятся только настройки, план и база анализа.")
+               if contains_inputs else "")
         )
-        remove = confirm.addButton(tr("Удалить папку"), QMessageBox.ButtonRole.DestructiveRole)
+        remove = confirm.addButton(
+            tr("Удалить с исходниками") if contains_inputs else tr("Удалить папку"),
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        keep = None
+        if contains_inputs:
+            keep = confirm.addButton(
+                tr("Удалить проект, оставить исходники"), QMessageBox.ButtonRole.AcceptRole,
+            )
         cancel = confirm.addButton(tr("Отмена"), QMessageBox.ButtonRole.RejectRole)
         confirm.setDefaultButton(cancel)
         confirm.setEscapeButton(cancel)
         style_message_box(confirm)
         confirm.exec()
-        return confirm.clickedButton() is remove
+        clicked = confirm.clickedButton()
+        self.keep_inputs = keep is not None and clicked is keep
+        approved = clicked is remove or self.keep_inputs
+        confirm.deleteLater()
+        return approved
 
     def confirm_selection(self) -> None:
-        if self.delete_project.isChecked() and not self.confirm_project_deletion():
+        if not self.remove_button.isEnabled():
             return
-        if self.remove_button.isEnabled():
-            self.accept()
+        self.confirmed_inputs = False
+        self.keep_inputs = False
+        if self.delete_project.isChecked():
+            if not self.confirm_project_deletion():
+                return
+            self.confirmed_inputs = bool(
+                not self.keep_inputs
+                and self.project_target
+                and self.project_target.contained_inputs
+            )
+        self.accept()

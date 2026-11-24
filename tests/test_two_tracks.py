@@ -13,8 +13,10 @@ from test_episode_panel import wait_until
 from test_episode_roll import roll_movie as roll_movie
 from test_music_edit import music_movie as music_movie
 
+from sculptcut.export_storage import metadata_path, variant_assets
 from sculptcut.media import discover, probe, run_process
 from sculptcut.music_edit import MusicClip, apply_music_edit, load_draft
+from sculptcut.output_naming import next_output_path
 from sculptcut.rendering import verify_output
 from sculptcut.track_edit import audible_clips, render_tracks, saved_music_clips
 from sculptcut.variants import read_variant
@@ -120,9 +122,19 @@ def test_bookend_cut_and_final_export_keep_absolute_music_gap(roll_movie):
         render_tracks(root, edit, preview, Event(), lambda _: None,
             clips=clips, video_changed=True, encoder='libx264')
         final_edit = prepare_combined_edit(root, preview, apply_current=False, exact_variant=True)
-        final = root/'renders/bookend-tracks.mp4'
+        folder = root / 'renders'
+        old = folder / 'bookend-tracks_timelapse.mp4'
+        history = metadata_path(old, '.variant.json')
+        soundtrack = variant_assets(old) / 'soundtrack.flac'
+        for artifact in (history, soundtrack):
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            artifact.write_bytes(b'old variant data')
+        final = next_output_path(folder, 'bookend-tracks', 'timelapse')
+        assert final == folder / 'bookend-tracks_timelapse-002.mp4'
         render_tracks(root, final_edit, final, Event(), lambda _: None,
             clips=saved_music_clips(preview), video_changed=True, preview=False, encoder='libx264')
+        assert not old.exists()
+        assert all(p.read_bytes() == b'old variant data' for p in (history, soundtrack))
         for i, output in enumerate((preview, final)):
             decoded = root/f'bookend-{i}.wav'
             run_process([discover('ffmpeg'), '-v', 'error', '-i', str(output), '-vn',

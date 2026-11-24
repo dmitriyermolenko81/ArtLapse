@@ -1,6 +1,7 @@
 """Pending edits survive restarts; saved video playback avoids re-encoding and frame drops."""
 import json
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,7 @@ from test_episode_roll import roll_movie as roll_movie
 
 from sculptcut.combined_edits import prepare_combined_edit
 from sculptcut.episode_playback import EpisodePlayback
+from sculptcut.output_cuts import cut_output
 from sculptcut.selection_draft import draft_path, restore_draft
 from sculptcut.source_selection import SourceSelection
 
@@ -78,6 +80,8 @@ def test_cursor_autosave_does_not_rewrite_the_full_montage_and_restores_position
     root, _, _, _, video = roll_movie
     window, dialog = open_editor(root, video, app)
     try:
+        row, a, b = dialog.montage_seek.blocks[0]
+        dialog.commit_edge(row, 'end', (a+b)//2)
         window.autosave_draft()
         path = draft_path(root, video)
         before = path.read_bytes()
@@ -90,8 +94,7 @@ def test_cursor_autosave_does_not_rewrite_the_full_montage_and_restores_position
         fresh = SourceSelection(prepare_combined_edit(root, video, exact_variant=True))
         restore_draft(root, video, fresh)
         assert fresh.restored_cursor == cursor
-        row, a, b = dialog.montage_seek.blocks[0]
-        dialog.commit_edge(row, 'end', (a+b)//2)
+        dialog.undo.click()
         window.autosave_draft()
         assert path.read_bytes() != before
         newer = SourceSelection(prepare_combined_edit(root, video, exact_variant=True))
@@ -99,6 +102,58 @@ def test_cursor_autosave_does_not_rewrite_the_full_montage_and_restores_position
         assert newer.plan == dialog.session.plan  # Old position sidecar cannot replace new edits.
     finally:
         finish(window, dialog, app)
+
+
+@pytest.mark.parametrize('baked_cut', [False, True])
+def test_reopen_and_close_only_save_changes_to_the_current_version(roll_movie, baked_cut):
+    app = QApplication.instance() or QApplication([])
+    root, _, _, _, video = roll_movie
+    if baked_cut:
+        video = cut_output(video, [(0, 300_000)], Event(), lambda _: None)
+    path = draft_path(root, video)
+    original = video.stat().st_mtime_ns
+    for _ in range(2):
+        window, dialog = open_editor(root, video, app)
+        try:
+            window.autosave_draft()
+        finally:
+            finish(window, dialog, app)
+        assert not path.parent.exists()
+
+    window, dialog = open_editor(root, video, app)
+    try:
+        cursor = dialog.montage_seek.blocks[1][1] + 100
+        dialog.seek_montage(cursor)
+    finally:
+        finish(window, dialog, app)
+    position = path.with_suffix('.position.json')
+    assert list(path.parent.iterdir()) == [position]
+
+    window, dialog = open_editor(root, video, app)
+    try:
+        assert dialog.session.restored_cursor == cursor
+        row, a, b = dialog.montage_seek.blocks[0]
+        dialog.commit_edge(row, 'end', (a+b)//2)
+        window.autosave_draft()
+        first = path.read_bytes()
+        dialog.undo.click()
+        final_plan = dialog.session.plan
+    finally:
+        finish(window, dialog, app)
+    assert path.read_bytes() != first
+    assert set(path.parent.iterdir()) == {path, position}
+    assert not list((root / 'previews').glob('*.mp4'))
+    assert video.stat().st_mtime_ns == original
+
+    saved = path.stat().st_mtime_ns
+    window, dialog = open_editor(root, video, app)
+    try:
+        assert dialog.session.plan == final_plan
+        assert dialog.session.redo_stack
+        window.save_trim_draft(force=True)
+    finally:
+        finish(window, dialog, app)
+    assert path.stat().st_mtime_ns == saved
 
 
 def test_30fps_jitter_does_not_drop_half_of_displayed_frames(monkeypatch):

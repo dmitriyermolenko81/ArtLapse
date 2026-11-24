@@ -11,7 +11,7 @@ from sculptcut.media import Cancelled, discover, probe, run_process
 from sculptcut.planning import RenderPlan, build_plan, plan_project
 from sculptcut.project import create_project
 from sculptcut.proxy import make_proxies
-from sculptcut.rendering import normalize_timing, render, verify_output
+from sculptcut.rendering import FINAL_CRF, normalize_timing, render, verify_output
 from sculptcut.review import review_html
 
 
@@ -134,10 +134,12 @@ def test_dense_preview_uses_one_output_encode(
         bookend_plan: RenderPlan | None = None,
         square_bands: bool = False,
         encoder: str = "auto",
+        quality: int = FINAL_CRF,
     ) -> list[int]:
         calls.append(source)
         return normalize_timing(
-            source, destination, fps, cancel, screen_guard, bookend_plan, square_bands, encoder
+            source, destination, fps, cancel, screen_guard, bookend_plan, square_bands, encoder,
+            quality=quality,
         )
 
     monkeypatch.setattr(rendering, "normalize_timing", tracked)

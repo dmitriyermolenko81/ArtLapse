@@ -1,4 +1,5 @@
 """Real encoded clips exercise conservative, timestamp-preserving flash repair."""
+import logging
 from threading import Event
 
 import cv2
@@ -14,8 +15,11 @@ from sculptcut.rendering import normalize_timing, verify_output
     ([20], [20]), (list(range(20, 35)), []),
     (list(range(5, 80, 10)), []), ([0, 89], []), ([], []), (list(range(90)), []),
 ])
-def test_real_flash_repair_preserves_uncertain_runs_and_frame_clock(tmp_path, bad, expected,
-                                                                   caplog):
+def test_real_flash_repair_preserves_uncertain_runs_and_frame_clock(
+    tmp_path, bad, expected, caplog, monkeypatch,
+):
+    # The CLI isolates its JSON logger. Let caplog observe it regardless of test order.
+    monkeypatch.setattr(logging.getLogger('artlapse'), 'propagate', True)
     source = tmp_path/'source.mp4'
     writer = cv2.VideoWriter(str(source), cv2.VideoWriter_fourcc(*'mp4v'), 30, (160, 96))
     assert writer.isOpened()

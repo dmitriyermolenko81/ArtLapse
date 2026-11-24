@@ -1,5 +1,6 @@
 """Keep managed export directories free of generated metadata."""
 
+import hashlib
 import logging
 import os
 import shutil
@@ -64,6 +65,31 @@ def variant_assets(video: Path) -> Path:
     return metadata_directory(video) / ".variant-assets" / video.stem
 
 
+def music_draft_path(root: Path, video: Path) -> Path:
+    key = hashlib.sha256(str(video.resolve()).casefold().encode()).hexdigest()[:20]
+    return root / "music-edit-drafts" / f"{key}.json"
+
+
+def export_path_in_use(
+    video: Path, *, include_lock: bool = True, extra_files: tuple[Path, ...] = (),
+) -> bool:
+    """Reserve names held by existing exports or by their saved companion data."""
+    if include_lock and os.path.lexists(publication_lock(video)):
+        return True
+    suffixes = (".variant.json", ".guard.json", ".music-edit.json")
+    assets = variant_assets(video)
+    paths = (
+        video, assets, video.parent / ".variant-assets" / video.stem,
+        *(metadata_path(video, suffix) for suffix in suffixes),
+        *(video.with_suffix(suffix) for suffix in suffixes),
+        *extra_files,
+    )
+    if any(os.path.lexists(path) for path in paths):
+        return True
+    return video.parent.name in ("renders", "previews") and os.path.lexists(
+        music_draft_path(video.parent.parent, video))
+
+
 @contextmanager
 def publish_export(
     ready: Path, video: Path, cancel: Event | None,
@@ -78,9 +104,7 @@ def publish_export(
     assets = variant_assets(video)
     files = (metadata_path(video, ".variant.json"), *extra_files)
     try:
-        if any(os.path.lexists(path) for path in (
-            video, video.with_suffix(".variant.json"), assets, *files,
-        )):
+        if export_path_in_use(video, include_lock=False, extra_files=extra_files):
             raise FileExistsError(f"Export path already in use: {video.name}")
         if cancel is not None and cancel.is_set():
             raise Cancelled("Сохранение отменено")

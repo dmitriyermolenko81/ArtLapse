@@ -11,7 +11,7 @@ from fractions import Fraction
 from pathlib import Path
 from threading import Event
 from time import monotonic
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from PySide6.QtCore import (
     QEvent,
@@ -142,6 +142,11 @@ from sculptcut.ui_theme import STYLE, style_message_box
 from sculptcut.update_dialog import UpdateController
 from sculptcut.variants import read_variant
 
+if TYPE_CHECKING:
+    from sculptcut.simple_timeline import SimpleTimeline
+    from sculptcut.source_selection_dialog import SourceSelectionDialog
+
+TrimDraftState = tuple[tuple[object, ...], tuple[int, float, float]]
 INI_FORMAT = QSettings.Format.IniFormat
 EPISODE_ROLL_ENABLED = False  # Paused experiment; retain saved edits and internal compatibility.
 
@@ -516,7 +521,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self._trim_saved_revision: tuple[int, int] = (0, 0)
+        self._trim_saved_state: TrimDraftState | None = None
         from sculptcut.application_identity import configure_multimedia_paths
 
         configure_multimedia_paths()
@@ -868,12 +873,22 @@ class MainWindow(QMainWindow):
         self.square_rois: dict[Path, Roi] = {}
         self.shorts_layout_label = QLabel(tr("Область видео"))
         self.shorts_layout_label.setObjectName("settingsCategory")
+        self.whole_model = QCheckBox(tr("Сохранять целую модель"))
+        self.whole_model.setToolTip(tr(
+            "Сохранять уже показанные части рисунка и обновлять видимую область. "
+            "При потере совмещения сохраняется последний надёжный вид."
+        ))
+        self.whole_model.hide()
+        self.whole_model.toggled.connect(self.whole_model_changed)
         shorts_page = QWidget()
         shorts_page.setObjectName("areaPage")
         shorts_page_layout = QVBoxLayout(shorts_page)
         shorts_page_layout.setContentsMargins(0, 0, 0, 0)
         self.area_pages.append(shorts_page_layout)
-        shorts_page_layout.addWidget(self.shorts_layout_label)
+        shorts_area_title = QHBoxLayout()
+        shorts_area_title.addWidget(self.shorts_layout_label, 1)
+        shorts_area_title.addWidget(self.whole_model)
+        shorts_page_layout.addLayout(shorts_area_title)
         shorts_area_row = QHBoxLayout()
         shorts_area_row.setSpacing(6)
         shorts_area_row.addWidget(self.shorts_layout, 1)
@@ -897,14 +912,6 @@ class MainWindow(QMainWindow):
         self.area_stack.addWidget(empty_area_page)
         self.frame_divider = category_divider()
         form.addRow(self.area_stack)
-        self.whole_model = QCheckBox(tr("Сохранять целую модель"))
-        self.whole_model.setToolTip(tr(
-            "Сохранять уже показанные части рисунка и обновлять видимую область. "
-            "При потере совмещения сохраняется последний надёжный вид."
-        ))
-        self.whole_model.hide()
-        self.whole_model.toggled.connect(self.whole_model_changed)
-        form.addRow(self.whole_model)
         self.webcam_rois: dict[Path, Roi | None] = {}
         self.webcam_enabled = QPushButton()
         self.webcam_enabled.setCheckable(True)
@@ -1112,6 +1119,8 @@ class MainWindow(QMainWindow):
         self.player.playbackStateChanged.connect(self.playback_state_changed)
         playback.addWidget(self.play_button)
         self.create_button = self.button(tr("Создать ролик"), self.create_or_export)
+        self.review_button = self.button(tr("Проверить перед экспортом"), self.review_photoshop)
+        self.review_button.hide()
         self.export_button = self.button(tr("Экспортировать"), self.export_preview)
         self.export_button.setEnabled(False)
         self.export_button.setToolTip(tr("Экспортировать просмотренный черновик из оригиналов"))
@@ -1272,6 +1281,7 @@ class MainWindow(QMainWindow):
         export_layout.addWidget(self.output_suffix)
         self.create_button.setMinimumWidth(210)
         export_layout.addWidget(self.create_button)
+        export_layout.addWidget(self.review_button)
         export_layout.addWidget(self.export_button)
         layout.addWidget(export_bar)
         bottom = QHBoxLayout()
@@ -1404,15 +1414,18 @@ class MainWindow(QMainWindow):
         compact = self.settings_scroll.viewport().height() < 600
         self.settings_layout.setContentsMargins(0, 0, 0, 0)
         self.settings_layout.setSpacing(0)
-        margins = (16, 10, 16, 10) if not self.whole_model.isHidden() else (16, 14, 16, 14)
-        self.mode_settings_layout.setContentsMargins(*((12, 2, 12, 0) if compact else margins))
+        self.mode_settings_layout.setContentsMargins(
+            *((12, 2, 12, 0) if compact else (16, 14, 16, 14)))
         for mode_button in (self.timelapse_mode, self.shorts_mode):
             mode_button.setFixedHeight(36 if compact else 40)
         self.settings_form.setVerticalSpacing(2 if compact else 8)
         for area_layout in self.area_pages:
             area_layout.setSpacing(3 if compact else 8)
-        label_height = max(self.frame_mode_label.sizeHint().height(),
-                           self.shorts_layout_label.sizeHint().height())
+        area_labels = (self.frame_mode_label, self.shorts_layout_label, self.full_frame_label)
+        label_height = max(self.whole_model.sizeHint().height(),
+                           *(label.sizeHint().height() for label in area_labels))
+        for label in area_labels:
+            label.setFixedHeight(label_height)
         self.area_stack.setFixedHeight(label_height + (3 if compact else 8)
                                        + (46 if compact else 52))
         for selector in (self.preset, self.frame_mode, self.shorts_layout,
@@ -1549,6 +1562,14 @@ class MainWindow(QMainWindow):
             self.status.setText(self.status.text() + tr(" Некоторые файлы недоступны."))
             self.status.setToolTip("\n".join(missing))
 
+    @staticmethod
+    def trim_draft_state(dialog: "SourceSelectionDialog", timeline: "SimpleTimeline"
+                         ) -> TrimDraftState:
+        session = dialog.session
+        return ((session.plan, session.project, session.base,
+                 len(session.undo_stack), len(session.redo_stack)),
+                (timeline.value(), timeline.view_start, timeline.view_span))
+
     def save_trim_draft(self, force: bool = False) -> bool:
         from sculptcut.selection_draft import draft_path, save_draft, save_navigation
         from sculptcut.simple_timeline import SimpleTimeline
@@ -1562,33 +1583,31 @@ class MainWindow(QMainWindow):
         if dialog.session.restore_note:
             self.status.setText(dialog.session.restore_note)
             return False
-        key = (id(dialog), id(dialog.session.plan), id(dialog.session.project),
-               len(dialog.session.undo_stack), len(dialog.session.redo_stack),
-               id(dialog.session.base), dialog.montage_seek.value(),
-               dialog.montage_seek.view_start, dialog.montage_seek.view_span)
-        previous = getattr(self, "_trim_saved_signature", None)
-        if not force and (key == previous or (dialog.sequence.desired and previous
-                                             and key[:6] == previous[:6])):
+        state = self.trim_draft_state(dialog, dialog.montage_seek)
+        previous = self._trim_saved_state
+        if state == previous:
+            return True
+        montage, (cursor, start, span) = state
+        navigation_only = previous is not None and montage == previous[0]
+        if navigation_only and not force and dialog.sequence.desired:
             return True
         try:
-            if not force and previous and key[:6] == previous[:6]:
-                save_navigation(dialog.root, dialog.video, dialog.montage_seek.value(),
-                    (dialog.montage_seek.view_start, dialog.montage_seek.view_span),
-                    self._trim_saved_revision)
+            if navigation_only:
+                save_navigation(dialog.root, dialog.video, cursor, (start, span),
+                                dialog.session.draft_revision)
             else:
-                save_draft(dialog.root, dialog.video, dialog.session, dialog.montage_seek.value(),
-                           (dialog.montage_seek.view_start, dialog.montage_seek.view_span),
+                save_draft(dialog.root, dialog.video, dialog.session, cursor, (start, span),
                            dialog.root_overrides)
                 stat = draft_path(dialog.root, dialog.video).stat()
-                self._trim_saved_revision = stat.st_size, stat.st_mtime_ns
+                dialog.session.draft_revision = stat.st_size, stat.st_mtime_ns
         except (OSError, ValueError) as exc:
             self.status.setText(tr("Не удалось сохранить подрезку: {0}").format(exc))
             return False
-        self._trim_saved_signature = key
+        self._trim_saved_state = state
         return True
 
-    def autosave_draft(self) -> None:
-        self.save_trim_draft()
+    def autosave_draft(self, *, closing: bool = False) -> None:
+        self.save_trim_draft(force=closing)
         # A draft also accepts incomplete forms; it never changes project.json.
         draft = json.dumps(self.form_draft(), ensure_ascii=False, sort_keys=True)
         if draft == self._draft_last:
@@ -1904,11 +1923,16 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, open_inline)
 
     def update_playback_controls(self) -> None:
+        from sculptcut.shorts_layout import PHOTOSHOP_PRESETS
+
         active = not self.player.source().isEmpty() and self.job is None
         self.play_button.setEnabled(active)
         self.seek.setEnabled(active)
         if hasattr(self, "export_button"):
             self.export_button.setEnabled(False)
+            self.review_button.setEnabled(False)
+            if not active and self.job is None:
+                self.review_button.hide()
         if hasattr(self, "selection_button"):
             self.selection_button.setEnabled(False)
         if hasattr(self, "roll_button"):
@@ -1917,6 +1941,7 @@ class MainWindow(QMainWindow):
                 return
             root = Path(self.folder.text().strip())
             video = self.current_edit_video(root)
+            review_available = False
             try:
                 if self.playback_snapshot_path != video:
                     self.playback_snapshot = read_variant(video) if video is not None else {}
@@ -1928,8 +1953,10 @@ class MainWindow(QMainWindow):
                 if draft and not pending and (root / "project.json").is_file():
                     pending = load_project(root).overrides != Project.model_validate(
                         snapshot["project"]).overrides
+                review_available = preset in PHOTOSHOP_PRESETS and bool(snapshot.get("plan"))
             except (OSError, ValueError):
                 preset, draft, pending = None, False, True
+            self.review_button.setVisible(review_available)
             self.roll_button.setEnabled(EPISODE_ROLL_ENABLED and preset == "timelapse"
                                         and self.roll_dialog is None)
             self.selection_button.setEnabled(preset in SELECTION_PRESETS
@@ -1941,6 +1968,9 @@ class MainWindow(QMainWindow):
                 pending = pending or selection.session.changed or (
                     selection.music_track is not None and selection.music_track.changed)
             self.export_button.setEnabled(draft and not pending)
+            self.review_button.setEnabled(review_available and not pending)
+            self.review_button.setToolTip(tr("Сначала обновите предпросмотр после правок")
+                if pending else tr("Сравнить монтаж с исходником в местах потери привязки"))
             self.manual_music_button.setEnabled(active and preset not in MUSIC_SHORTS_PRESETS)
             self.export_button.setToolTip(tr("Сначала обновите предпросмотр после правок")
                 if pending
@@ -2268,19 +2298,21 @@ class MainWindow(QMainWindow):
     def show_recent_projects(self) -> None:
         menu = QMenu(self)
         menu.setToolTipsVisible(True)
-        paths = self.recent_project_paths()
-        if not paths:
-            menu.addAction(tr("Пока нет недавних проектов")).setEnabled(False)
-        for root in paths:
-            available = (root / "project.json").is_file()
-            label = f"{root.name}  ·  {root.parent}"
-            action = menu.addAction(label if available else label + tr(" (недоступен)"))
+        for root in self.recent_project_paths():
+            try:
+                if not (root / "project.json").is_file():
+                    continue
+            except OSError:
+                continue
+            action = menu.addAction(f"{root.name}  ·  {root.parent}")
             action.setData(str(root))
             action.setToolTip(str(root))
-            action.setEnabled(available)
+        if menu.isEmpty():
+            menu.addAction(tr("Нет доступных недавних проектов")).setEnabled(False)
         chosen = menu.exec(self.recent_button.mapToGlobal(QPoint(0, self.recent_button.height())))
         if chosen is not None and chosen.data():
             self.open_project_folder(Path(str(chosen.data())))
+        menu.deleteLater()
 
     def open_project_folder(self, root: Path) -> None:
         self.edit_history.clear()
@@ -2607,7 +2639,7 @@ class MainWindow(QMainWindow):
             return
         from sculptcut.cleanup_dialog import CleanupDialog
         from sculptcut.project_cleanup import cleanup_files, format_bytes, remove_cleanup_files
-        from sculptcut.project_deletion import remove_project_folder
+        from sculptcut.project_deletion import remove_project_folder, remove_project_metadata
 
         root = Path(self.folder.text().strip()).absolute()
         inputs = self.source_paths() + [
@@ -2629,6 +2661,8 @@ class MainWindow(QMainWindow):
         selected = dialog.selected_files()
         whole = dialog.delete_project.isChecked()
         target = dialog.project_target
+        confirmed_inputs = dialog.confirmed_inputs
+        keep_inputs = dialog.keep_inputs
         if (not whole and not selected) or (whole and target is None):
             return
         if whole and self.episode_panel is not None and self.episode_panel.root == root:
@@ -2657,16 +2691,20 @@ class MainWindow(QMainWindow):
         ) -> str:
             stage(
                 tr("Проверка и удаление папки проекта…")
-                if whole
+                if whole and not keep_inputs
                 else tr("Удаление выбранных файлов…")
             )
-            result = (remove_project_folder(target, cancel, progress, inputs)
-                      if whole and target is not None else
-                      remove_cleanup_files(root, selected, cancel, progress, inputs))
+            if whole and target is not None:
+                result = (remove_project_metadata(target, cancel, progress, inputs) if keep_inputs
+                          else remove_project_folder(target, cancel, progress, inputs,
+                                                     include_inputs=confirmed_inputs))
+            else:
+                result = remove_cleanup_files(root, selected, cancel, progress, inputs)
             return json.dumps({
                 "removed": result.removed, "bytes": result.bytes_removed,
                 "errors": result.errors, "cancelled": result.cancelled,
-                "project_removed": whole and not root.exists() and not result.errors,
+                "project_removed": whole and not (root / "project.json").exists()
+                and not result.errors and not result.cancelled,
             })
 
         def cleaned(value: str) -> None:
@@ -2721,11 +2759,13 @@ class MainWindow(QMainWindow):
     def remove_sources(self) -> None:
         if self.job:
             return
-        rows = sorted(
-            (self.sources.row(item) for item in self.sources.selectedItems()), reverse=True
-        )
+        selected = self.sources.selectedItems()
+        rows = sorted((self.sources.row(item) for item in selected), reverse=True)
         if not rows:
             return
+        removed_paths = {
+            Path(str(item.data(Qt.ItemDataRole.UserRole))).resolve() for item in selected
+        }
         self.sources.blockSignals(True)
         for row in rows:
             self.sources.takeItem(row)
@@ -2740,6 +2780,35 @@ class MainWindow(QMainWindow):
         self.status.setText(
             tr("Убрано из списка: ") + str(len(rows)) + tr(". Исходные файлы сохранены.")
         )
+        self.offer_remove_review_presentation(removed_paths)
+
+    def offer_remove_review_presentation(self, removed_paths: set[Path]) -> None:
+        from sculptcut.review_presentation import review_presentation_settings
+
+        if not self.folder.text().strip():
+            return
+        root = Path(self.folder.text().strip()).resolve()
+        video = self.current_edit_video(root)
+        if video is None:
+            return
+        try:
+            settings = review_presentation_settings(video)
+        except (OSError, ValueError):
+            logging.getLogger("artlapse").warning(
+                "Could not read review presentation", exc_info=True,
+            )
+            return
+        if (settings is None or settings.presentation_video is None
+                or settings.presentation_video.resolve() not in removed_paths):
+            return
+
+        if self.confirm_review_presentation(
+            tr("Убрать презентацию и из открытого ролика?"),
+            tr("Убрать и из ролика"), tr("Только из списка"),
+        ):
+            self.apply_review_presentation(
+                root, video, None, settings.presentation_seconds, settings.presentation_position,
+            )
 
     def open_outputs(self) -> None:
         text = self.folder.text().strip()
@@ -2878,16 +2947,32 @@ class MainWindow(QMainWindow):
         if self.job:
             return
         from sculptcut.presentation_dialog import PresentationDialog
+        from sculptcut.review_presentation import review_presentation_settings
 
         paths = self.listed_source_paths()
         if not paths:
             return
+        root = Path(self.folder.text().strip()).resolve()
+        video = self.current_edit_video(root)
+        try:
+            saved = review_presentation_settings(video) if video else None
+        except (OSError, ValueError) as exc:
+            self.show_error(str(exc))
+            return
         dialog = PresentationDialog(self.presentation_video, self.presentation_seconds,
                                     self.presentation_position, paths, self,
-                                    media=self.source_media_cache)
+                                    media=self.source_media_cache,
+                                    reviewed_has_presentation=bool(saved and
+                                                                   saved.presentation_video))
         self.source_preview_ready.connect(dialog.set_source_media)
         result = exec_anchored(dialog, self.presentation_button)
         if result == QDialog.DialogCode.Accepted:
+            if dialog.remove_from_review and video is not None:
+                self.apply_review_presentation(
+                    root, video, dialog.path, dialog.seconds.value(), dialog.placement,
+                )
+                dialog.deleteLater()
+                return
             if dialog.path is not None:
                 self.intro_image.clear()
             settings = ProjectSettings(
@@ -2905,7 +2990,62 @@ class MainWindow(QMainWindow):
                 tr("Презентация выбрана, заставка отключена.")
                 if settings.presentation_video else tr("Презентация проекта отключена.")
             )
+            clip = settings.presentation_video
+            if video is not None and saved is not None and clip is not None:
+                previous = saved.presentation_video
+                changed = previous is None or (
+                    clip.resolve() != previous.resolve()
+                    or settings.presentation_seconds != saved.presentation_seconds
+                    or settings.presentation_position != saved.presentation_position
+                )
+                if changed and self.confirm_review_presentation(
+                    tr("Добавить презентацию и в открытый ролик?") if previous is None
+                    else tr("Заменить презентацию и в открытом ролике?"),
+                    tr("Добавить и в ролик") if previous is None else tr("Заменить и в ролике"),
+                    tr("Только для новой сборки"),
+                ):
+                    self.apply_review_presentation(
+                        root, video, clip,
+                        settings.presentation_seconds, settings.presentation_position,
+                    )
         dialog.deleteLater()
+
+    def confirm_review_presentation(self, question: str, apply: str, skip: str) -> bool:
+        dialog = QMessageBox(
+            QMessageBox.Icon.Question, tr("Презентация в открытом ролике"), question, parent=self,
+        )
+        dialog.setInformativeText(tr("Откроется новая версия с тем же монтажом."))
+        skip_button = dialog.addButton(skip, QMessageBox.ButtonRole.RejectRole)
+        apply_button = dialog.addButton(apply, QMessageBox.ButtonRole.AcceptRole)
+        dialog.setDefaultButton(skip_button)
+        dialog.setEscapeButton(skip_button)
+        style_message_box(dialog)
+        dialog.exec()
+        confirmed = dialog.clickedButton() is apply_button
+        dialog.deleteLater()
+        return confirmed
+
+    def apply_review_presentation(
+        self, root: Path, video: Path, clip: Path | None, seconds: float,
+        position: Literal["start", "end"],
+    ) -> None:
+        from sculptcut.review_presentation import update_review_presentation
+
+        if self.job:
+            return
+        self.player.pause()
+        self.export_note = ""
+
+        def operation(cancel: Event, progress: Callable[[float], None],
+                      stage: Callable[[str], None]) -> str:
+            return str(update_review_presentation(root, video, clip, seconds, position, cancel))
+
+        self.job = Job(operation)
+        self.job.result.connect(self.show_result)
+        self.job.failure.connect(self.show_error)
+        self.job.finished.connect(self.job_finished)
+        self.begin_job(tr("Обновляем презентацию просмотренного ролика…") if clip
+                       else tr("Убираем презентацию из просмотренного ролика…"))
 
     def choose_intro_image(self) -> None:
         if self.job:
@@ -3437,6 +3577,7 @@ class MainWindow(QMainWindow):
                               restore_navigation: bool = True) -> None:
         if self.job is not None or self.selection_dialog is not None:
             return
+        from sculptcut.simple_timeline import SimpleTimeline
         from sculptcut.source_selection_dialog import SourceSelectionDialog
 
         root = Path(self.folder.text().strip()).resolve()
@@ -3444,10 +3585,16 @@ class MainWindow(QMainWindow):
         if video is None:
             return
         self.player.pause()
+        pending_cuts = list(self.output_editor.cuts)
         dialog = SourceSelectionDialog(root,video,self,
             position=self.player.position() if position is None else position,
-            cuts=list(self.output_editor.cuts),volume_state=self.volume_state,
-            compact=True,modern=True,restore_navigation=restore_navigation)
+            cuts=pending_cuts,volume_state=self.volume_state,
+            compact=True,modern=True,restore_navigation=restore_navigation,
+            shorten_on_delete=self.recent_settings.value(
+                "shorten_on_delete", False, type=bool) is True)
+        dialog.delete_mode_changed.connect(
+            lambda value: self.recent_settings.setValue("shorten_on_delete", value),
+        )
         self.selection_dialog = dialog
         self.cut_section.setProperty("inlineEditing", True)
         self.cut_section.style().unpolish(self.cut_section)
@@ -3487,6 +3634,9 @@ class MainWindow(QMainWindow):
             dialog.plan_changed.connect(self.update_playback_controls)
             dialog.music_changed.connect(self.update_playback_controls)
             edit_statistics()
+            if (isinstance(dialog.montage_seek, SimpleTimeline)
+                    and (not pending_cuts or dialog.session.draft_revision is not None)):
+                self._trim_saved_state = self.trim_draft_state(dialog, dialog.montage_seek)
             def quick_busy(busy: bool) -> None:
                 label = tr("Готовим быструю перемотку…")
                 if (busy and self.job is None
@@ -3525,7 +3675,7 @@ class MainWindow(QMainWindow):
 
             if self.job is not None:
                 return
-            if dialog.session.fixed_duration and dialog.session.changed:
+            if dialog.session.keep_duration and dialog.session.changed:
                 dialog.session.fit_duration()
             video_changed = dialog.session.changed
             music_clips = (list(dialog.music_track.clips) if dialog.music_track is not None
@@ -3550,7 +3700,9 @@ class MainWindow(QMainWindow):
 
                 try:
                     if video_changed:
-                        draft_path(root, video).unlink(missing_ok=True)
+                        saved_draft = draft_path(root, video)
+                        saved_draft.unlink(missing_ok=True)
+                        saved_draft.with_suffix('.position.json').unlink(missing_ok=True)
                 except OSError:
                     logging.getLogger("artlapse").warning(
                         "Applied edit draft could not be removed", exc_info=True)
@@ -3603,6 +3755,7 @@ class MainWindow(QMainWindow):
             self.video_frame_image = old_image
             self.fit_video_frame()
             self.selection_dialog = None
+            self._trim_saved_state = None
             self.cut_section.setProperty("inlineEditing", False)
             self.cut_section.style().unpolish(self.cut_section)
             self.cut_section.style().polish(self.cut_section)
@@ -3683,6 +3836,54 @@ class MainWindow(QMainWindow):
         dialog.activateWindow()
         self.update_playback_controls()
 
+    def review_photoshop(self) -> None:
+        from sculptcut.photoshop_review import alignment_markers
+        from sculptcut.photoshop_review_dialog import PhotoshopReviewDialog
+        from sculptcut.planning import RenderPlan
+        from sculptcut.source_selection_dialog import SourceSelectionDialog
+
+        if self.job is not None or not self.review_button.isEnabled():
+            return
+        root = Path(self.folder.text().strip()).resolve()
+        video = self.current_edit_video(root)
+        if video is None:
+            return
+        try:
+            snapshot = read_variant(video)
+            project = Project.model_validate(snapshot["project"])
+            plan = RenderPlan.model_validate(snapshot["plan"])
+            duration, markers = alignment_markers(video, project, plan)
+            if (root / "project.json").is_file():
+                project = resolve_snapshot_sources(project, load_project(root))
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            self.show_error(str(exc))
+            return
+        self.player.pause()
+        selection = self.selection_dialog
+        if isinstance(selection, SourceSelectionDialog) and not selection.loading:
+            selection.sequence.stop()
+            selection.stop_context()
+        sources = {source.id: source.path for source in project.sources}
+        editable = project.settings.preset in SELECTION_PRESETS and (root/'project.json').is_file()
+        dialog = PhotoshopReviewDialog(video, sources, plan.output_fps, duration, markers, self,
+                                       editable=editable)
+        dialog.edit_requested.connect(self.open_review_episode)
+        dialog.open()
+
+    def open_review_episode(self, source_id: str, timestamp: int) -> None:
+        from sculptcut.source_selection_dialog import SourceSelectionDialog
+
+        if self.selection_dialog is None:
+            self.show_source_selection(restore_navigation=False)
+        selection = self.selection_dialog
+        if isinstance(selection, SourceSelectionDialog):
+            if not selection.isVisible():
+                self.toggle_output_editor()
+            if selection.loading:
+                selection.ready.connect(lambda: selection.seek_review_source(source_id, timestamp))
+            else:
+                selection.seek_review_source(source_id, timestamp)
+
     def export_preview(self) -> None:
         if self.job is not None or not self.export_button.isEnabled():
             return
@@ -3695,12 +3896,17 @@ class MainWindow(QMainWindow):
         def operation(cancel: Event, progress: Callable[[float], None],
                       stage: Callable[[str], None]) -> str:
             from sculptcut.combined_edits import prepare_combined_edit
+            from sculptcut.review_copy import copy_review
             from sculptcut.track_edit import render_tracks, saved_music_clips
 
+            stage(tr("Сохраняем просмотренный ролик"))
+            settings = Project.model_validate(read_variant(video)["project"]).settings
+            destination = next_output_path(root / "renders",
+                settings.output_name or video.stem, settings.preset)
+            if copy_review(root, video, destination, cancel, progress, draft=False):
+                return str(destination)
             stage(tr("Экспортируем просмотренный монтаж из оригиналов"))
             edit = prepare_combined_edit(root, video, apply_current=False, exact_variant=True)
-            destination = next_output_path(root / "renders",
-                edit.project.settings.output_name or video.stem, edit.project.settings.preset)
             return str(render_tracks(root, edit, destination, cancel, progress,
                 encoder_status=self.encoder_ready.emit,
                 clips=saved_music_clips(video),
@@ -3947,7 +4153,7 @@ class MainWindow(QMainWindow):
 
     def finish_close(self, event: QCloseEvent) -> None:
         self.updates.shutdown()
-        self.autosave_draft()
+        self.autosave_draft(closing=True)
         self.draft_timer.stop()
         self.seek.shutdown()
         if self.selection_dialog is not None:

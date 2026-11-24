@@ -120,6 +120,8 @@ class HoverTimelineKeys(QObject):
             row = next((row for row, a, b in lane.blocks if a <= ms < b), -1)
             if row < 0:
                 return True
+            if lane is self.video_lane and command == "delete":
+                self.owner.flush_navigation()
             self.owner.seek_montage(ms, follow=False)
             if lane is music.lane:
                 music.select(row)

@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from sculptcut.export_storage import publication_lock
+from sculptcut.export_storage import export_path_in_use
 
 INVALID_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 RESERVED_NAMES = {
@@ -57,7 +57,7 @@ def next_variant_path(folder: Path, variant: str, preset: str) -> Path:
     """Choose a numbered derivative name that retains its preset label."""
     suffix = output_suffix(preset)
     index = 1
-    while _occupied(folder / f"{variant}-{index:03d}{suffix}.mp4"):
+    while export_path_in_use(folder / f"{variant}-{index:03d}{suffix}.mp4"):
         index += 1
     return folder / f"{variant}-{index:03d}{suffix}.mp4"
 
@@ -68,19 +68,15 @@ def next_output_path(folder: Path, requested_name: str = "", preset: str = "") -
     suffix = output_suffix(preset) if preset else ""
     if not name:
         index = 1
-        while _occupied(folder / f"timelapse-{index:03d}{suffix}.mp4"):
+        while export_path_in_use(folder / f"timelapse-{index:03d}{suffix}.mp4"):
             index += 1
         return folder / f"timelapse-{index:03d}{suffix}.mp4"
     if suffix and not name.lower().endswith(suffix):
         name += suffix
     first = folder / f"{name}.mp4"
-    if not _occupied(first):
+    if not export_path_in_use(first):
         return first
     index = 2
-    while _occupied(folder / f"{name}-{index:03d}.mp4"):
+    while export_path_in_use(folder / f"{name}-{index:03d}.mp4"):
         index += 1
     return folder / f"{name}-{index:03d}.mp4"
-
-
-def _occupied(video: Path) -> bool:
-    return video.exists() or publication_lock(video).exists()

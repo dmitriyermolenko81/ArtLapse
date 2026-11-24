@@ -1,5 +1,6 @@
 """Remove ranges from an existing export without touching its source file."""
 
+import json
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -7,6 +8,7 @@ from threading import Event
 
 from sculptcut.audio import add_music
 from sculptcut.domain import Project
+from sculptcut.export_storage import metadata_path, music_draft_path
 from sculptcut.media import Cancelled, discover, probe, run_process
 from sculptcut.variants import read_variant
 
@@ -80,6 +82,7 @@ def cut_output(
     cuts: list[tuple[int, int]],
     cancel: Event,
     progress: Callable[[float], None],
+    *, destination: Path | None = None, video_only: bool = False,
 ) -> Path:
     info = probe(source)
     if info.duration_us is None:
@@ -87,75 +90,99 @@ def cut_output(
     ranges = retained_ranges(info.duration_us, cuts)
     if not cuts:
         raise ValueError("Выберите хотя бы один участок")
-    soundtrack = saved_soundtrack(source)
+    soundtrack = None if video_only else saved_soundtrack(source)
+    from sculptcut.music_edit import assemble_music, mux_music, parse_music_clips, save_draft
+    from sculptcut.track_edit import audible_clips
+
+    lane = metadata_path(source, ".music-edit.json")
+    project_root = source.parent.parent
+    clips = (parse_music_clips(json.loads(lane.read_text(encoding="utf-8")))
+             if not video_only and destination is None
+             and source.parent.name in ("renders", "previews")
+             and lane.is_file() else None)
     ffmpeg = discover("ffmpeg")
     with tempfile.TemporaryDirectory(prefix="cut-", dir=source.parent) as directory:
         folder = Path(directory)
-        for index, (start, end) in enumerate(ranges):
-            arguments = [
-                ffmpeg,
-                "-v",
-                "error",
-                "-nostdin",
-                "-ss",
-                str(start / 1e6),
-                "-i",
-                str(source),
-                "-t",
-                str((end - start) / 1e6),
-                "-map",
-                "0:v:0",
-                *(["-an"] if soundtrack else ["-map", "0:a:0?"]),
-                "-c:v",
-                "libx264",
-                "-bf",
-                "0",
-                "-vf",
-                "setpts=PTS-STARTPTS",
-                "-preset",
-                "fast",
-                "-crf",
-                "18",
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "192k",
-                "-avoid_negative_ts",
-                "make_zero",
-                str(folder / f"part-{index}.mp4"),
-            ]
-            run_process(arguments, cancel)
-            progress((index + 1) / (len(ranges) + 2 if soundtrack else len(ranges) + 1))
-        playlist = folder / "parts.txt"
-        playlist.write_text(
-            "".join(f"file 'part-{i}.mp4'\n" for i in range(len(ranges))), encoding="utf-8"
-        )
-        result = folder / "ready.mp4"
-        run_process(
-            [
-                ffmpeg,
-                "-v",
-                "error",
-                "-nostdin",
-                "-f",
-                "concat",
-                "-safe",
-                "1",
-                "-i",
-                str(playlist),
-                "-c",
-                "copy",
-                "-movflags",
-                "+faststart",
-                str(result),
-            ],
-            cancel,
-        )
+        from sculptcut.smart_cut import splice_video
+
+        spliced = (splice_video(source, folder, ranges, info, cancel)
+                   if video_only or not info.audio_streams or soundtrack or clips is not None
+                   else None)
+        if spliced is not None:
+            result = spliced
+        else:
+            for index, (start, end) in enumerate(ranges):
+                arguments = [
+                    ffmpeg,
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-ss",
+                    str(start / 1e6),
+                    "-i",
+                    str(source),
+                    "-t",
+                    str((end - start) / 1e6),
+                    "-map",
+                    "0:v:0",
+                    *(["-an"] if soundtrack or video_only or clips is not None
+                      else ["-map", "0:a:0?"]),
+                    "-c:v",
+                    "libx264",
+                    "-bf",
+                    "0",
+                    "-vf",
+                    "setpts=PTS-STARTPTS",
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "18",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    "-avoid_negative_ts",
+                    "make_zero",
+                    str(folder / f"part-{index}.mp4"),
+                ]
+                run_process(arguments, cancel)
+                progress((index + 1) / (len(ranges) + 2 if soundtrack else len(ranges) + 1))
+            playlist = folder / "parts.txt"
+            playlist.write_text(
+                "".join(f"file 'part-{i}.mp4'\n" for i in range(len(ranges))), encoding="utf-8"
+            )
+            result = folder / "ready.mp4"
+            run_process(
+                [
+                    ffmpeg,
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-f",
+                    "concat",
+                    "-safe",
+                    "1",
+                    "-i",
+                    str(playlist),
+                    "-c",
+                    "copy",
+                    "-movflags",
+                    "+faststart",
+                    str(result),
+                ],
+                cancel,
+            )
         expected = sum(b - a for a, b in ranges)
         ready = result
-        if soundtrack:
+        mixed_track = None
+        if clips is not None:
+            mixed_track = assemble_music(project_root, audible_clips(clips, expected),
+                                         expected, cancel)
+            ready = folder / "ready-with-music.mp4"
+            mux_music(result, mixed_track, ready, expected, cancel)
+        elif soundtrack:
             music, loop, fade_seconds = soundtrack
             ready = folder / "ready-with-music.mp4"
             add_music(
@@ -173,23 +200,39 @@ def cut_output(
             250_000, len(ranges) * 100_000
         ):
             raise ValueError("Длительность результата не соответствует вырезкам")
-        if bool(output.audio_streams) != bool(info.audio_streams):
+        if bool(output.audio_streams) != (bool(info.audio_streams) and not video_only):
             raise ValueError("Не удалось сохранить звуковую дорожку")
-        run_process(
-            [ffmpeg, "-v", "error", "-xerror", "-i", str(ready), "-f", "null", "-"], cancel
-        )
+        if spliced is None:
+            run_process([ffmpeg, "-v", "error", "-xerror", "-i", str(ready),
+                         "-f", "null", "-"], cancel)
+        elif soundtrack or clips is not None:
+            from sculptcut.remux_check import verify_remux
+
+            verify_remux(spliced, ready, cancel)
         for number in range(1, 100_000):
             if cancel.is_set():
                 raise Cancelled("Сохранение отменено")
-            destination = source.with_name(f"{source.stem}-edit-{number:03}.mp4")
+            candidate = destination or source.with_name(f"{source.stem}-edit-{number:03}.mp4")
             try:
                 from sculptcut.export_storage import publish_export
                 from sculptcut.variants import save_variant
 
-                with publish_export(ready, destination, cancel):
-                    save_variant(destination, parent=source, cuts=cuts, operation="cut")
+                target_lane = metadata_path(candidate, ".music-edit.json")
+                draft = music_draft_path(project_root, candidate)
+                with publish_export(ready, candidate, cancel,
+                                    extra_files=(target_lane, draft) if clips is not None else ()):
+                    save_variant(candidate, ready=ready, parent=source, cuts=cuts, operation="cut",
+                                 music=mixed_track)
+                    if clips is not None:
+                        from sculptcut.project import atomic_write
+
+                        save_draft(project_root, candidate, clips, ready=ready)
+                        atomic_write(target_lane, json.dumps(
+                            [c.model_dump(mode="json") for c in clips], ensure_ascii=False))
                 progress(1)
-                return destination
+                return candidate
             except FileExistsError:
+                if destination is not None:
+                    raise
                 continue
     raise ValueError("Не удалось выбрать имя для копии")

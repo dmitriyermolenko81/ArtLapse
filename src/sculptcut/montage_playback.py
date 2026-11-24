@@ -152,7 +152,7 @@ class MontagePlayback(QObject):
         self.episode_only = episode_only
         self.entries = []
         head = body_start_frame(project.settings, plan.output_fps, plan.actual_frame_count)
-        compact = plan.settings.get('selection_duration_policy') == 'fixed'
+        compact = plan.settings.get('selection_duration_policy') in ('fixed', 'shorten')
         clock = timeline_start(project, plan, leading or [])
         if video is not None and head and not episode_only:
             cuts = json.loads(str(plan.settings.get('selection_head', json.dumps(leading or []))))

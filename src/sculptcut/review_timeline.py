@@ -100,7 +100,7 @@ class ReviewTimeline(SimpleTimeline):
 
     def handle_at(self, x: float, y: float) -> tuple[int, str] | None:
         top, bottom = lane_bounds(self)
-        if not ((top-4 <= y <= top+6 or bottom-8 <= y <= bottom) if self.compact_lane else (
+        if not ((top-4 <= y <= bottom-4) if self.compact_lane else (
                 18 <= y <= 27 or 47 <= y <= 72)):
             return None
         candidates = []
@@ -152,6 +152,9 @@ class ReviewTimeline(SimpleTimeline):
         x, y = event.position().x(), event.position().y()
         if (not self.pointer_down and self.pan_x is None and top <= y <= bottom
                 and self.left_padding <= x <= self.width()-10 and not self.edit_at(x, y)):
+            if any(abs(x-self.x_at(ms)) <= 5 for ms in self.split_positions):
+                self.setToolTip(tr('Ручной разрез'))
+                return
             ms = self.time_at(x)
             piece = next((c for c in self.pieces if c.start_ms <= ms < c.end_ms), None)
             if piece is not None and piece.tooltip:

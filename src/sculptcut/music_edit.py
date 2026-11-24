@@ -9,7 +9,7 @@ from threading import Event
 from pydantic import Field, model_validator
 
 from sculptcut.domain import Model, Project
-from sculptcut.export_storage import metadata_path, publish_export
+from sculptcut.export_storage import metadata_path, music_draft_path, publish_export
 from sculptcut.media import Cancelled, MediaInfo, discover, probe, run_process
 from sculptcut.music_library import audio_duration, music_signature
 from sculptcut.output_naming import next_variant_path
@@ -17,6 +17,8 @@ from sculptcut.planning import RenderPlan
 from sculptcut.project import atomic_write
 from sculptcut.shorts_layout import MUSIC_SHORTS_PRESETS
 from sculptcut.variants import cut_history, read_variant, save_variant
+
+draft_path = music_draft_path
 
 
 class MusicClip(Model):
@@ -112,11 +114,6 @@ def validate_clips(clips: list[MusicClip], duration_us: int) -> None:
         end = clip.at_us+clip.end_us-clip.start_us
         if end > duration_us:
             raise ValueError('Музыкальный фрагмент выходит за конец ролика.')
-
-
-def draft_path(root: Path, video: Path) -> Path:
-    key = hashlib.sha256(str(video.resolve()).casefold().encode()).hexdigest()[:20]
-    return root/'music-edit-drafts'/f'{key}.json'
 
 
 def save_draft(root: Path, video: Path, clips: list[MusicClip],
@@ -241,8 +238,10 @@ def apply_music_edit(root: Path, video: Path, clips: list[MusicClip], cancel: Ev
             'music_fade_seconds': 0})})
     plan = RenderPlan.model_validate(state['plan']) if state.get('plan') else None
     if plan:
+        quality = ({'preview_quality': 'original'}
+                   if not plan.settings.get('draft') and video.parent == root/'renders' else {})
         plan = plan.model_copy(update={'settings': {
-            k: v for k, v in plan.settings.items() if k != 'request_key'} | {
+            k: v for k, v in plan.settings.items() if k != 'request_key'} | quality | {
                 'draft': preview, 'music_fingerprint': music_signature(project.settings)
                 if project else plan.settings.get('music_fingerprint', '')}})
     kept_clips = clips if draft_clips is None else draft_clips
@@ -250,10 +249,12 @@ def apply_music_edit(root: Path, video: Path, clips: list[MusicClip], cancel: Ev
     with tempfile.TemporaryDirectory(prefix='music-version-', dir=output.parent) as scratch:
         result = Path(scratch)/'result.mp4'
         mux_music(video, music, result, info.duration_us, cancel)
-        run_process([discover('ffmpeg'), '-v', 'error', '-xerror', '-i', str(result),
-                     '-f', 'null', '-'], cancel)
+        from sculptcut.remux_check import verify_remux
+
+        verify_remux(video, result, cancel)
         with publish_export(result, output, cancel, extra_files=(draft_path(root, output), lane)):
-            save_variant(output, project=project, plan=plan, music=music, parent=parent or video,
+            save_variant(output, ready=result, project=project, plan=plan, music=music,
+                parent=parent or video,
                 operation=operation, history=cut_history(video),
                 bookend_cuts=state.get('bookend_cuts_us'),
                 episode_base_plan=RenderPlan.model_validate(state['episode_base_plan'])

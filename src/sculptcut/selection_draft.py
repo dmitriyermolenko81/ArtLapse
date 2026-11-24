@@ -3,6 +3,7 @@
 import hashlib
 import json
 import math
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -19,13 +20,16 @@ def draft_path(root: Path, video: Path) -> Path:
 
 
 def save_navigation(root: Path, video: Path, cursor: int, view: tuple[float, float],
-                    revision: tuple[int, int]) -> None:
+                    revision: tuple[int, int] | None) -> None:
     path = draft_path(root, video)
-    stat = path.stat()
-    if (stat.st_size, stat.st_mtime_ns) != revision:
+    stat = path.stat() if path.is_file() else None
+    current = (stat.st_size, stat.st_mtime_ns) if stat else None
+    if current != revision:
         raise ValueError("Проект изменился вне редактора подрезки.")
+    video_stat = video.stat()
     atomic_write(path.with_suffix('.position.json'), json.dumps({
-        'revision': list(revision), 'cursor': cursor, 'view': view}))
+        'revision': revision, 'video': [video_stat.st_size, video_stat.st_mtime_ns],
+        'cursor': cursor, 'view': view}))
 
 
 def save_draft(root: Path, video: Path, session: SourceSelection, cursor: int,
@@ -51,11 +55,19 @@ def save_draft(root: Path, video: Path, session: SourceSelection, cursor: int,
     atomic_write(draft_path(root, video), json.dumps(data, ensure_ascii=False))
 
 
-def restore_draft(root: Path, video: Path, session: SourceSelection) -> None:
+def restore_draft(root: Path, video: Path, session: SourceSelection, *,
+                  pending_cuts: bool = False) -> None:
     path = draft_path(root, video)
-    if not path.is_file():
+    try:
+        draft_file = path.open(encoding="utf-8")
+    except FileNotFoundError:
+        if not pending_cuts:
+            _restore_navigation(path, video, session)
         return
-    data = json.loads(path.read_text(encoding="utf-8"))
+    with draft_file:
+        stat = os.fstat(draft_file.fileno())
+        revision = stat.st_size, stat.st_mtime_ns
+        data = json.load(draft_file)
     if not isinstance(data, dict):
         raise ValueError('Повреждённый черновик подрезки.')
     stat = video.stat()
@@ -85,28 +97,40 @@ def restore_draft(root: Path, video: Path, session: SourceSelection) -> None:
     view = float(data["view"][0]), float(data["view"][1])
     if not all(math.isfinite(v) and v >= 0 for v in view):
         raise ValueError("Неверный масштаб сохранённой подрезки.")
-    # Navigation-only autosaves must never serialize the montage/history again.
-    # A sidecar can attach only to the exact validated full draft revision.
-    try:
-        position = json.loads(path.with_suffix('.position.json').read_text(encoding='utf-8'))
-        stat = path.stat()
-        if position['revision'] == [stat.st_size, stat.st_mtime_ns]:
-            point = max(0, int(position['cursor']))
-            region = float(position['view'][0]), float(position['view'][1])
-            if all(math.isfinite(v) and v >= 0 for v in region):
-                cursor, view = point, region
-    except (OSError, ValueError, KeyError, TypeError, IndexError):
-        pass  # The full edit draft remains valid if optional navigation is lost.
     session.original = replace(session.original, cuts=[tuple(c) for c in data["cuts"]],
         leading=[tuple(c) for c in data["leading"]], trailing=[tuple(c) for c in data["trailing"]])
     session.base, session.plan, session.project = base, plan, project
     session.reference = reference
     session.fixed_duration = (session.fixed_duration
                               or plan.settings.get('selection_duration_policy') == 'fixed')
-    if session.fixed_duration and session.changed:
+    if session.keep_duration and session.changed:
         session.plan = fit_selection(project, plan, session.original.leading,
                                      session.original.trailing)
     session.target = base.actual_frame_count
     session.undo_stack, session.redo_stack = undo, redo
     session.restored_cursor = cursor
     session.restored_view = view
+    session.draft_revision = revision
+    _restore_navigation(path, video, session)
+
+
+def _restore_navigation(path: Path, video: Path, session: SourceSelection) -> None:
+    try:
+        position = json.loads(path.with_suffix('.position.json').read_text(encoding='utf-8'))
+        revision = session.draft_revision
+        if revision is not None:
+            if position['revision'] != list(revision):
+                return
+        else:
+            stat = video.stat()
+            if position['revision'] is not None or position['video'] != [
+                stat.st_size, stat.st_mtime_ns,
+            ]:
+                return
+        cursor = max(0, int(position['cursor']))
+        view = float(position['view'][0]), float(position['view'][1])
+        if all(math.isfinite(value) and value >= 0 for value in view):
+            session.restored_cursor = cursor
+            session.restored_view = view
+    except (OSError, ValueError, KeyError, TypeError, IndexError):
+        pass  # Position is optional and may belong to an earlier revision.

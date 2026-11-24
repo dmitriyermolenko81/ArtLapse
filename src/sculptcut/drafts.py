@@ -18,7 +18,12 @@ def ensure_draft(root: Path, video: Path, cancel: Event,
     """Editing an older final MP4 starts a preview revision, preserving that file."""
     if is_draft(video):
         return video
+    from sculptcut.review_copy import copy_review
+
+    state = read_variant(video)
+    preset = (state.get("project") or {}).get("settings", {}).get("preset", "timelapse")
+    destination = next_output_path(root / "previews", video.stem + "-draft", preset)
+    if copy_review(root, video, destination, cancel, progress, draft=True):
+        return destination
     edit = prepare_combined_edit(root, video, apply_current=False, exact_variant=True)
-    destination = next_output_path(root / "previews", video.stem + "-draft",
-                                    edit.project.settings.preset)
     return render_combined_edit(root, edit, destination, cancel, progress, preview=True)

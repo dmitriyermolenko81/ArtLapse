@@ -1,6 +1,7 @@
-from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QSettings, QTimer
+from PySide6.QtWidgets import QApplication, QMenu
 
+from sculptcut.i18n import tr
 from sculptcut.project import create_empty_project
 from sculptcut.project_library import merge_projects, previous_settings, project_paths
 
@@ -81,3 +82,46 @@ def test_new_extraction_shows_projects_from_previous_window(tmp_path, monkeypatc
             window._allow_close = True
             window.close()
             app.processEvents()
+
+
+def test_recent_menu_hides_missing_projects_until_they_return(tmp_path):
+    from sculptcut.ui import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    disconnected = tmp_path / "Disconnected"
+    available = tmp_path / "Available"
+    uninitialized = tmp_path / "Folder without a project"
+    uninitialized.mkdir()
+    saved = [disconnected, available, uninitialized]
+    window.project_library.setValue("recent_projects", [str(root) for root in saved])
+    window.project_library.sync()
+
+    def menu_items():
+        items = []
+
+        def capture():
+            popup = app.activePopupWidget()
+            if isinstance(popup, QMenu):
+                items.extend((a.text(), a.data(), a.isEnabled()) for a in popup.actions())
+                popup.close()
+
+        QTimer.singleShot(30, capture)
+        window.recent_button.click()
+        return items
+
+    try:
+        window.show()
+        app.processEvents()
+        assert menu_items() == [(tr("Нет доступных недавних проектов"), None, False)]
+        create_empty_project(available)
+        assert [(data, enabled) for _, data, enabled in menu_items()] == [(str(available), True)]
+        create_empty_project(disconnected)
+        assert [(data, enabled) for _, data, enabled in menu_items()] == [
+            (str(disconnected), True), (str(available), True),
+        ]
+        assert window.recent_project_paths() == saved
+    finally:
+        window._allow_close = True
+        window.close()
+        app.processEvents()

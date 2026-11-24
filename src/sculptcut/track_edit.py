@@ -51,7 +51,8 @@ def render_tracks(root: Path, edit: CombinedEdit, destination: Path, cancel: Eve
         if video_changed:
             video = render_combined_edit(root, edit, Path(scratch)/'video.mp4', cancel,
                 lambda value: progress(value*.85), encoder=encoder,
-                encoder_status=encoder_status, preview=preview, operation='source_selection')
+                encoder_status=encoder_status, preview=preview, operation='source_selection',
+                replacement_audio=True)
         duration = probe(video).duration_us
         if not duration:
             raise ValueError('Не удалось определить длительность видео.')

@@ -13,7 +13,7 @@ IconName = Literal[
     "screen", "viewport", "play", "pause", "cut", "add", "close", "chevron_down", "chevron_up",
     "check", "info",
     "trash", "crop", "episodes_music", "feedback", "presentation", "speaker", "muted",
-    "templates", "update", "settings",
+    "templates", "update", "settings", "shorten_duration",
 ]
 
 
@@ -260,6 +260,14 @@ def ui_icon(name: IconName, accent: str = "#a9cbff") -> QIcon:
         painter.drawLine(QPointF(12, 6), QPointF(12, 12))
         painter.drawLine(QPointF(12, 12), QPointF(17, 15))
         painter.drawLine(QPointF(4, 5), QPointF(4, 1))
+    elif name == "shorten_duration":
+        for x, direction in ((2, 1), (22, -1)):
+            tip = x + 7 * direction
+            painter.drawLine(QPointF(x, 12), QPointF(tip, 12))
+            arrow = QPainterPath(QPointF(tip - 4 * direction, 8))
+            arrow.lineTo(QPointF(tip, 12))
+            arrow.lineTo(QPointF(tip - 4 * direction, 16))
+            painter.drawPath(arrow)
     elif name == "speed":
         for x in (3, 12):
             arrow = QPainterPath(QPointF(x, 5))

@@ -66,9 +66,11 @@ class PlacementSelector(QWidget):
 class PresentationDialog(QDialog):
     def __init__(self, video: Path | None, seconds: float, position: str,
                  sources: list[Path], parent: QWidget | None = None, *,
-                 media: Mapping[str, tuple[QImage, str]] | None = None) -> None:
+                 media: Mapping[str, tuple[QImage, str]] | None = None,
+                 reviewed_has_presentation: bool = False) -> None:
         super().__init__(parent)
         self._media = dict(media or {})
+        self.reviewed_has_presentation = reviewed_has_presentation
         self.setWindowTitle(tr("Презентация проекта"))
         self.setFixedWidth(510)
         apply_dialog_theme(self, """
@@ -151,10 +153,14 @@ class PresentationDialog(QDialog):
         self.note.hide()
         layout.addWidget(self.note)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        self.remove_from_review = False
+        self.review_button = buttons.addButton(tr("Убрать из просмотренного ролика"),
+                                               QDialogButtonBox.ButtonRole.ActionRole)
+        self.review_button.setObjectName("primary")
+        self.review_button.clicked.connect(self.accept_review)
         self.apply_button = buttons.addButton(
-            tr("Применить"), QDialogButtonBox.ButtonRole.AcceptRole
+            tr("Применить"), QDialogButtonBox.ButtonRole.AcceptRole,
         )
-        self.apply_button.setObjectName("primary")
         self.apply_button.setMinimumWidth(116)
         self.apply_button.setDefault(True)
         buttons.accepted.connect(self.accept)
@@ -193,14 +199,27 @@ class PresentationDialog(QDialog):
                     ))
 
     def update_controls(self) -> None:
+        remove_now = self.reviewed_has_presentation and self.path is None
+        self.review_button.setVisible(remove_now)
+        self.apply_button.setText(tr("Для новой сборки") if remove_now else tr("Применить"))
+        self.apply_button.setObjectName("" if remove_now else "primary")
+        self.apply_button.style().unpolish(self.apply_button)
+        self.apply_button.style().polish(self.apply_button)
+        self.apply_button.setDefault(not remove_now)
+        self.review_button.setDefault(remove_now)
         self.position.setEnabled(self.path is not None)
         self.seconds.setEnabled(self.path is not None)
         self.note.hide()
         self.update_preview()
         self.adjustSize()
 
+    def accept_review(self) -> None:
+        self.remove_from_review = True
+        self.accept()
+
     def accept(self) -> None:
         if self.path is not None and not self.path.is_file():
+            self.remove_from_review = False
             self.note.setText(tr("Файл не найден. Найдите исходное видео "
                               "или выберите «Без презентации»."))
             self.note.show()

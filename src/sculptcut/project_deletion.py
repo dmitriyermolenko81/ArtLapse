@@ -1,4 +1,4 @@
-"""Delete a confirmed project folder without following links or touching source media."""
+"""Delete a confirmed project folder and protect sources outside it."""
 
 import stat
 import sys
@@ -22,6 +22,7 @@ class ProjectFolder:
     root: Path
     identity: tuple[int, int]
     project_identity: tuple[int, int, int, int]
+    contained_inputs: tuple[Path, ...] = ()
 
 
 def directory_identity(path: Path) -> tuple[int, int]:
@@ -32,7 +33,9 @@ def directory_identity(path: Path) -> tuple[int, int]:
     return info.st_dev, info.st_ino
 
 
-def project_deletion_target(root: Path, extra_inputs: Iterable[Path] = ()) -> ProjectFolder:
+def project_deletion_target(
+    root: Path, extra_inputs: Iterable[Path] = (), *, include_inputs: bool = False,
+) -> ProjectFolder:
     root = root.absolute()
     # Inspect the lexical path before resolving: a junction must never turn into a target.
     for parent in (root, *root.parents):
@@ -49,13 +52,14 @@ def project_deletion_target(root: Path, extra_inputs: Iterable[Path] = ()) -> Pr
     if not plain_file(root, marker):
         raise ValueError("Папка не содержит обычный файл проекта ArtLapse.")
     project = load_project(root)
-    for path in protected_paths(project, extra_inputs):
-        if path == root or path.is_relative_to(root):
-            raise ValueError(
-                "Внутри проекта находятся исходники, музыка или заставка. "
-                "Сначала перенесите их и обновите пути в проекте."
-            )
-    return ProjectFolder(root, directory_identity(root), file_identity(marker))
+    contained = tuple(sorted({p for p in protected_paths(project, extra_inputs)
+                              if p.is_relative_to(root)}))
+    if contained and not include_inputs:
+        raise ValueError(
+            "Внутри проекта находятся исходники, музыка или заставка. "
+            "Сначала перенесите их и обновите пути в проекте."
+        )
+    return ProjectFolder(root, directory_identity(root), file_identity(marker), contained)
 
 
 def check_folder(target: ProjectFolder, path: Path) -> None:
@@ -67,9 +71,47 @@ def check_folder(target: ProjectFolder, path: Path) -> None:
         raise ValueError("Папка проекта изменилась после подтверждения.")
 
 
-def remove_project_folder(
+def remove_project_metadata(
     target: ProjectFolder, cancel: Event, progress: Callable[[float], None],
     extra_inputs: Iterable[Path] = (),
+) -> CleanupResult:
+    """Forget the project while preserving media and other files in its folder."""
+    root = target.root
+    inputs = tuple(extra_inputs)
+    removed = total = 0
+    try:
+        if project_deletion_target(root, inputs, include_inputs=True) != target:
+            raise ValueError("Папка проекта изменилась после подтверждения.")
+        protected_inputs = protected_paths(load_project(root), inputs)
+        marker = root / "project.json"
+        if protected(marker, [path for path in protected_inputs if path.is_file()]):
+            raise ValueError("Описание проекта указано как исходный файл.")
+        files = []
+        for name in ("render_plan.json", "analysis.sqlite-wal", "analysis.sqlite-shm",
+                     "analysis.sqlite"):
+            path = root / name
+            if path.exists() and plain_file(root, path) and not protected(path, protected_inputs):
+                files.append((path, file_identity(path)))
+        files.append((marker, target.project_identity))
+        for index, (path, identity) in enumerate(files):
+            if cancel.is_set():
+                return CleanupResult(removed, total, (), True)
+            check_folder(target, root)
+            if (not plain_file(root, path) or file_identity(path) != identity
+                    or file_identity(marker) != target.project_identity):
+                raise ValueError("Папка или файл изменились. Дальнейшее удаление остановлено.")
+            path.unlink()
+            removed += 1
+            total += identity[2]
+            progress((index + 1) / len(files))
+        return CleanupResult(removed, total, (), False)
+    except (OSError, ValueError) as exc:
+        return CleanupResult(removed, total, (str(exc),), cancel.is_set())
+
+
+def remove_project_folder(
+    target: ProjectFolder, cancel: Event, progress: Callable[[float], None],
+    extra_inputs: Iterable[Path] = (), *, include_inputs: bool = False,
 ) -> CleanupResult:
     """Validate the complete tree first, then unlink only the inspected files; marker last."""
     root = target.root
@@ -77,10 +119,11 @@ def remove_project_folder(
     marker = root / "project.json"
     inputs = tuple(extra_inputs)
     try:
-        if project_deletion_target(root, inputs) != target:
+        if project_deletion_target(root, inputs, include_inputs=include_inputs) != target:
             raise ValueError("Папка проекта изменилась после подтверждения. "
                              "Откройте удаление заново.")
-        protected_inputs = protected_paths(load_project(root), inputs)
+        protected_inputs = [p for p in protected_paths(load_project(root), inputs)
+                            if p not in target.contained_inputs]
         files: list[tuple[Path, tuple[int, int, int, int]]] = []
         directories: list[tuple[Path, tuple[int, int]]] = []
         pending = [root]
@@ -106,7 +149,7 @@ def remove_project_folder(
                 else:
                     raise ValueError("В папке есть неподдерживаемый тип файла. Удаление отменено.")
             progress(-1)
-        if project_deletion_target(root, inputs) != target:
+        if project_deletion_target(root, inputs, include_inputs=include_inputs) != target:
             raise ValueError("Проект изменился во время проверки. Удаление отменено.")
         marker_data = marker.read_bytes()
         ordinary = [(path, identity) for path, identity in files if path != marker]

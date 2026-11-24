@@ -422,6 +422,7 @@ def render_combined_edit(
     encoder_status: Callable[[str], None] | None = None,
     preview: bool = False,
     operation: str = "combined_edit",
+    replacement_audio: bool = False,
 ) -> Path:
     """Render body edits from originals, then retain any deliberately trimmed bookends."""
     if destination.suffix.lower() != ".mp4" or destination.exists():
@@ -446,6 +447,31 @@ def render_combined_edit(
         def progress(value: float) -> None:
             render_progress(0.15 + value * 0.85)
     bookends = edit.bookend_cuts()
+    if preview and not bookends and edit.parent.is_file():
+        from sculptcut.episode_cuts import episode_cut_ranges
+        from sculptcut.export_storage import publish_export
+        from sculptcut.project import validate_sources
+
+        cuts = episode_cut_ranges(edit.parent, edit.project, edit.plan)
+        if cuts:
+            validate_sources(root, edit.project)
+            validate_plan(edit.project, edit.plan)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=destination.parent) as scratch:
+                result = cut_output(edit.parent, cuts, cancel, lambda v: progress(v * .95),
+                                    destination=Path(scratch) / "trim.mp4",
+                                    video_only=replacement_audio)
+                soundtrack = saved_soundtrack(edit.parent)
+                plan = edit.plan.model_copy(update={"settings": edit.plan.settings | {
+                    "preview_quality": "original"}})
+                with publish_export(result, destination, cancel):
+                    save_variant(destination, ready=result, project=edit.snapshot, plan=plan,
+                                 parent=edit.parent,
+                                 operation=operation, cuts=edit.cuts, history=[],
+                                 music=soundtrack[0] if soundtrack else None,
+                                 episode_base_plan=edit.base_plan)
+            progress(1)
+            return destination
     if not bookends:
         return render(root, edit.project, edit.plan, destination, cancel, preview,
                       progress=progress,

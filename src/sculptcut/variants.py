@@ -14,7 +14,7 @@ from sculptcut.export_storage import (
     variant_assets,
 )
 from sculptcut.planning import RenderPlan
-from sculptcut.project import atomic_write
+from sculptcut.project import atomic_write, fingerprint
 
 
 def read_variant(video: Path) -> dict[str, Any]:
@@ -122,6 +122,7 @@ def save_variant(
     bookend_cuts: list[tuple[int, int]] | None = None,
     episode_base_plan: RenderPlan | None = None,
     episode_catalogue: dict[str, Any] | None = None,
+    ready: Path | None = None,
 ) -> None:
     snapshot = metadata_path(video, ".variant.json")
     if snapshot.exists() or video.with_suffix(".variant.json").exists():
@@ -159,6 +160,8 @@ def save_variant(
         "cuts_us": cuts or [],
         "cut_history_us": history,
     }
+    if ready is not None:
+        state["video_fingerprint"] = fingerprint(ready)
     if bookend_cuts is not None:
         state["bookend_cuts_us"] = bookend_cuts
     elif operation in ("cut", "music") and inherited.get("bookend_cuts_us"):
