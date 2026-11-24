@@ -1,10 +1,8 @@
 # ArtLapse
 
-Stable Photoshop close-ups, a fixed painting reference, and export history improvements. [Release details](docs/releases/0.1.7.md).
-
 **English** | [Русский](README.ru.md)
 
-**[Download ArtLapse 0.1.7 for Windows x64](https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.7/ArtLapse-0.1.7-Windows-x64.zip)** · [Release notes](https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.7)
+**[Download ArtLapse 0.1.8 for Windows x64](https://github.com/dmitriyermolenko81/ArtLapse/releases/download/v0.1.8/ArtLapse-0.1.8-Windows-x64.zip)** · [Release notes](https://github.com/dmitriyermolenko81/ArtLapse/releases/tag/v0.1.8)
 
 Extract the entire ZIP and run **ArtLapse.exe**. Python, Qt and FFmpeg are included.
 
@@ -19,24 +17,13 @@ and Russian. The primary platform is Windows x64.
 Actual application screenshot with a ZBrush sculpting recording. The preview stays
 above two compact timelines; editing remains in the main window.
 
-## New in 0.1.7
+## New in 0.1.8
 
-Stable Photoshop close-ups, a fixed painting reference, and export history improvements. [Release details](docs/releases/0.1.7.md).
-
-- One source episode catalogue for every mode; modes choose different excerpts from it.
-- Shared manual source corrections and reusable completed analysis, with cache status.
-- Compact video and music timelines inside the main window, with independent edits.
-- Real audio waveforms inside music clips, loaded in the background and cached.
-- Split, trim and delete music sections without overwriting the following clips.
-- Optional fade-in and fade-out curves added from the clip's right-click menu.
-- Hover shortcuts: Q to split, Delete to remove, Ctrl+Z / Ctrl+Y to undo / redo.
-- Space to play or pause, with protection while typing, dragging or using dialogs.
-- Music editing is locked for beat-synced versions to preserve their timing.
-- Playback starts at the beginning, including the intro or presentation.
-- Refined audio preview synchronization and modern scrollbars, including version lists.
-
-The obsolete still-frame-to-music presets have been removed from the mode selector.
-Existing projects retain compatibility.
+- Apply episode edits, music changes and presentation changes directly to the open preview. Compatible video segments are reused when possible.
+- Choose whether **Delete** keeps the target duration or shortens the video using the two icons by the timeline.
+- In Photoshop Shorts, **Review before export** marks tracking losses and opens the edit and source side by side.
+- Autosave keeps one set of pending edits per video. Opening and closing an unchanged video creates no edit draft.
+- Project deletion offers a choice to keep source files. Recent Projects lists available projects.
 
 | Music waveforms | Optional volume fades |
 | --- | --- |
